@@ -407,6 +407,8 @@ EN: dict[str, str] = {
         "Server busy (503). The model is overloaded right now.",
     "API hatası": "API error",
     "API anahtarı boş.": "The API key is empty.",
+    # api.py kisa bicimi kullanir, chat.py'deki uzun surumden ayri anahtardir
+    "API anahtarı girilmemiş.": "No API key has been entered.",
     "Bağlantı kurulamadı": "Could not connect",
     "Bağlantı kurulamadı.": "Could not connect.",
     "Bağlantı hatası": "Connection error",
