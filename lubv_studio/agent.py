@@ -12,7 +12,7 @@ import time
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from . import tools
+from . import platform_, tools
 from .api import ApiError, DeepSeekClient
 from .config import (
     CEVAP_DILI, CHAT_KIPI_TALIMATI, OTO_MODU_TALIMATI, PLAN_MODU_TALIMATI,
@@ -105,7 +105,8 @@ def build_system_prompt(
             "# PROJE",
             f"Kok klasor: {workspace.root}",
             f"Tarih: {time.strftime('%d.%m.%Y')}",
-            "Isletim sistemi: Windows, kabuk: PowerShell",
+            f"Isletim sistemi: {platform_.isletim_sistemi()}, "
+            f"kabuk: {platform_.kabuk_adi()}",
         ]
         if acik_dosyalar:
             proje.append("Kullanicinin editorde acik dosyalari: " + ", ".join(acik_dosyalar))

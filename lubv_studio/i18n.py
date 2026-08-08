@@ -208,8 +208,9 @@ EN: dict[str, str] = {
         "Stops the running command and restarts the shell",
     "komut yaz ve Enter'a bas, örnek: git status":
         "type a command and press Enter, e.g. git status",
-    "PowerShell oturumu açıldı": "PowerShell session started",
-    "PowerShell başlatılamadı.": "PowerShell could not start.",
+    "oturumu açıldı": "session started",
+    "Kabuk başlatılamadı.": "The shell could not start.",
+    "Sekmeyi kapat": "Close tab",
     "Terminal hazır değil. Önce proje klasörü seç.":
         "Terminal is not ready. Choose a project folder first.",
     "Proje klasörü yok.": "No project folder.",
@@ -261,8 +262,6 @@ EN: dict[str, str] = {
     "Commit'lerde görünecek e-posta:": "Email shown on commits:",
     "Kimlik kaydedilemedi, terminalden dene.":
         "Could not save the identity, try from the terminal.",
-    "PowerShell oturumu açıldı": "PowerShell session started",
-    "PowerShell başlatılamadı.": "PowerShell could not start.",
     "Terminal hazır değil. Önce proje klasörü seç.":
         "Terminal is not ready. Choose a project folder first.",
     "depo yok": "no repo",

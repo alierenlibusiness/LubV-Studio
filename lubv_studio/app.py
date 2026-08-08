@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, Qt
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont, QFontInfo, QIcon
 from PySide6.QtWidgets import QApplication
 
 from .config import APP_NAME, Config
+from . import platform_
 from .i18n import ayarla as dili_ayarla
 from .icons import uygulama_ikonu
 from .main_window import MainWindow
@@ -72,14 +73,19 @@ def main() -> int:
     uygulama.setStyle("Fusion")
     uygulama.setPalette(palette())   # Fusion'in beyaz varsayilanlarini kapatir
 
-    simge_yolu = _kaynak("lubv.ico")
+    simge_yolu = _kaynak(platform_.ikon_dosyasi())
     if simge_yolu.exists():
         uygulama.setWindowIcon(QIcon(str(simge_yolu)))
     else:
         uygulama.setWindowIcon(QIcon(uygulama_ikonu(256)))
 
-    yazi = QFont("Segoe UI")
-    yazi.setPointSize(10)
+    yazi = QFont()
+    for aday in platform_.ui_yazi_tipleri():
+        deneme = QFont(aday)
+        if QFontInfo(deneme).family().lower() == aday.lower():
+            yazi = deneme
+            break
+    yazi.setPointSize(13 if platform_.MACOS else 10)
     yazi.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
     uygulama.setFont(yazi)
 

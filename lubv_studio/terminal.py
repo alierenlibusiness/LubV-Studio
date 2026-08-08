@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout,
 )
 
+from . import platform_
 from .icons import ikon
 from .i18n import t
 from .theme import C
@@ -21,12 +22,7 @@ _ANSI_RE = re.compile(r"\x1B\[[0-9;?]*[ -/]*[@-~]")
 
 
 def _mono(size: int = 12) -> QFont:
-    font = QFont("Cascadia Mono")
-    if not font.exactMatch():
-        font = QFont("Consolas")
-    font.setStyleHint(QFont.StyleHint.Monospace)
-    font.setPointSize(size)
-    return font
+    return platform_.kod_yazi_tipi(size)
 
 
 class Terminal(QFrame):
@@ -124,11 +120,8 @@ class Terminal(QFrame):
         self.proc.setWorkingDirectory(self.cwd)
         self.proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self.proc.readyReadStandardOutput.connect(self._oku)
-        kabuk = "powershell.exe"
-        self.proc.start(
-            kabuk,
-            ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "-"],
-        )
+        program, argumanlar, _ = platform_.kabuk()
+        self.proc.start(program, argumanlar)
         if self.proc.waitForStarted(4000):
             self._yaz(t("PowerShell oturumu açıldı") + f"  ·  {self.cwd}\n", C["muted"])
             self.calistir("$ProgressPreference='SilentlyContinue'", sessiz=True)
@@ -405,14 +398,14 @@ class GitPanel(QFrame):
             self.mesaj.setFocus()
             return
         guvenli = mesaj.replace('"', "'")
-        self.komut_istendi.emit(f'git add -A; git commit -m "{guvenli}"')
+        self._komutlari_gonder(["git add -A", f'git commit -m "{guvenli}"'])
         self.mesaj.clear()
 
     def depo_kur(self) -> None:
         if not self.kimligi_saglat():
             return
-        self.komut_istendi.emit(
-            'git init; git add -A; git commit -m "Initial commit"'
+        self._komutlari_gonder(
+            ["git init", "git add -A", 'git commit -m "Initial commit"']
         )
 
     # ---------- git kimligi ----------
@@ -511,11 +504,28 @@ class GitPanel(QFrame):
         `git rev-parse HEAD` stdout'a "HEAD" yazdigi icin ciktiya bakmak yanlis
         sonuc verir ve ilk commit hic atilmaz.
         """
-        return (
-            "if (-not (Test-Path .git)) { git init | Out-Null }; "
-            "git rev-parse --verify -q HEAD > $null 2>&1; "
-            'if ($LASTEXITCODE -ne 0) { git add -A; git commit -m "Initial commit" | Out-Null }; '
-        )
+        komutlar: list[str] = []
+        if not (Path(self.cwd) / ".git").is_dir():
+            komutlar.append("git init")
+        if not self._commit_var_mi():
+            komutlar += ["git add -A", 'git commit -m "Initial commit"']
+        return komutlar
+
+    def _commit_var_mi(self) -> bool:
+        """Depoda en az bir commit var mi?
+
+        Cikis koduna bakilir: bos depoda `git rev-parse HEAD` stdout'a "HEAD"
+        yazdigi icin ciktiya bakmak yanlis sonuc verir.
+        """
+        return git_calistir(self.cwd, "rev-parse", "--verify", "HEAD")[0]
+
+    def _uzak_var_mi(self) -> bool:
+        return git_calistir(self.cwd, "remote", "get-url", "origin")[0]
+
+    def _komutlari_gonder(self, komutlar: list[str]) -> None:
+        """Komutlari sirayla terminale yollar; kullanici hepsini ve ciktisini gorur."""
+        for komut in komutlar:
+            self.komut_istendi.emit(komut)
 
     def uzak_bagla(self) -> None:
         if not self.kimligi_saglat():
@@ -529,12 +539,16 @@ class GitPanel(QFrame):
             self.uzak.setFocus()
             return
 
-        self.komut_istendi.emit(
-            self._ilk_commit_komutu()
-            + "git remote remove origin 2>$null; "
-            + f'git remote add origin "{adres}"; '
-            + "git branch -M main; git push -u origin main"
+        # Kabuk sozdizimi kullanilmaz (PowerShell / zsh / bash hepsinde ayni
+        # calissin diye): kosullar Python tarafinda cozulur, terminale sadece
+        # duz git komutlari gider.
+        komutlar = self._ilk_commit_komutu()
+        komutlar.append(
+            f'git remote set-url origin "{adres}"' if self._uzak_var_mi()
+            else f'git remote add origin "{adres}"'
         )
+        komutlar += ["git branch -M main", "git push -u origin main"]
+        self._komutlari_gonder(komutlar)
 
     def github_repo_olustur(self) -> None:
         if not self.cwd or not self.kimligi_saglat():
@@ -577,9 +591,11 @@ class GitPanel(QFrame):
         )
         bayrak = "--public" if gorunurluk == QMessageBox.StandardButton.Yes else "--private"
 
-        self.komut_istendi.emit(
-            self._ilk_commit_komutu()
-            + "git branch -M main; "
-            + f'gh repo create "{ad}" {bayrak} --source=. --remote=origin --push'
-        )
+        komutlar = self._ilk_commit_komutu()
+        komutlar += [
+            "git branch -M main",
+            f'gh repo create "{ad}" {bayrak} --source=. --remote=origin --push',
+        ]
+        self._komutlari_gonder(komutlar)
         self.uzak.setText(f"{kullanici}/{ad}")
+        self.uzak.setCursorPosition(0)

@@ -10,7 +10,7 @@ real project: reading files, writing code, running commands, searching the web.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-53FC18.svg?style=flat-square)](LICENSE)
 ![Python](https://img.shields.io/badge/Python-3.10+-53FC18.svg?style=flat-square)
-![Platform](https://img.shields.io/badge/Platform-Windows-53FC18.svg?style=flat-square)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-53FC18.svg?style=flat-square)
 ![UI](https://img.shields.io/badge/UI-PySide6-53FC18.svg?style=flat-square)
 
 ![LUBV Studio](docs/screenshot.png)
@@ -53,13 +53,19 @@ meter so you always know what you are spending.
 | **Persistent memory** | Notes that survive across chats, scoped per project or globally. |
 | **Sandboxed** | Every path resolves inside the project root. Escapes are rejected, not warned about. |
 | **Bilingual** | Turkish and English interface. The agent answers in whichever you pick. |
+| **Cross platform** | Windows and macOS, with the shell, fonts and packaging adapted per platform. |
 
 ## Install
 
-### Prebuilt executable
+Runs on **Windows and macOS** (and Linux, less tested).
 
-Download `LUBV Studio.exe` from the [Releases](../../releases) page and run it.
-No Python, no dependencies, single file.
+### Prebuilt application
+
+Download the build for your platform from the [Releases](../../releases) page.
+No Python, no dependencies.
+
+- Windows: `LUBV Studio.exe`, a single file, just run it.
+- macOS: `LUBV Studio.app`, drag it into Applications.
 
 ### From source
 
@@ -70,16 +76,20 @@ pip install -r requirements.txt
 python -m lubv_studio
 ```
 
-On Windows you can also double click `run.bat`, which installs the
-dependencies on first run and then launches the app.
+Or use the launcher for your platform, which installs the dependencies on
+first run and then starts the app:
+
+- Windows: double click `run.bat`
+- macOS and Linux: `./run.sh`
 
 ### Build your own executable
 
 ```bash
-python build_exe.py     # or double click build.bat
+python build_exe.py     # or build.bat on Windows, ./build.sh elsewhere
 ```
 
-Output lands in `dist/LUBV Studio.exe` (~61 MB, self contained).
+Output lands in `dist/`: a single `.exe` on Windows (~61 MB), a `.app` bundle
+on macOS. Icons for both platforms are generated during the build.
 
 ## First run
 
@@ -100,7 +110,7 @@ Output lands in `dist/LUBV Studio.exe` (~61 MB, self contained).
 │ ⑂  │  file tree   │   line numbers, syntax   │  Code / Chat  │
 │ 🧠 │              │   Ctrl+S to save         │  Plan/Approve │
 │ ✦  │              ├──────────────────────────┤  /Auto        │
-│ ↩  │              │   PowerShell terminal    │  messages +   │
+│ ↩  │              │   integrated terminal    │  messages +   │
 │ ⚙  │              │   live, stateful         │  tool cards   │
 └────┴──────────────┴──────────────────────────┴───────────────┘
   project · status · cursor · session cost · today cost · model
@@ -135,7 +145,7 @@ prompt, just conversation.
 | List folder | Directory contents |
 | Search project | Full text search across the workspace |
 | Delete file | Removes a file, after approval |
-| Run command | Executes in the project folder via PowerShell (`python`, `git`, `npm`, anything) |
+| Run command | Executes in the project folder, in your shell: PowerShell on Windows, zsh on macOS |
 | Web search | Live search for current docs, error messages, library versions |
 | Fetch page | Opens a URL and extracts the readable text |
 | Write memory | Leaves a durable note for future sessions |

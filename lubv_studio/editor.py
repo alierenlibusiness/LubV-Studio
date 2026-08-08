@@ -10,11 +10,14 @@ from PySide6.QtGui import (
     QTextFormat, QTextOption,
 )
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QTabWidget, QTextEdit,
-    QVBoxLayout, QWidget,
+    QFrame, QLabel, QPlainTextEdit, QTabBar, QTabWidget, QTextEdit,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from .i18n import t
+from . import platform_
+from .i18n import t
+from .icons import ikon
 from .theme import C
 
 # --------------------------------------------------------------------------
@@ -83,15 +86,47 @@ DILLER = {
 
 # Kod icinde neon yesil yorucu olur: vurgu rengi yumusatilmis tonu kullanilir,
 # tam parlak yesil sadece arayuz ogelerine ayrilir.
+# Her belirtec turu ayri renkte. Yesil dilin iskeletine ayrildi; okunurluk icin
+# kalan turler farkli tonlarda, hepsi siyah zeminde en az 4.5:1 kontrastta.
 RENKLER = {
-    "keyword": "#5FE83A",    # yesil: dilin iskeleti
-    "string": "#D9C26A",     # soluk altin: metinler
-    "comment": "#4E5654",    # gri: yorumlar geride kalsin
+    "keyword": "#5FE83A",    # def, class, if, return: dilin iskeleti
+    "builtin": "#4FD6C8",    # print, len, range: dilin hazir araclari
+    "self": "#FF7B72",       # self, this, cls: ozel isaretciler
+    "literal": "#FF9B6A",    # True, False, None
+    "string": "#E3C877",     # metinler
+    "escape": "#F0A868",     # metin icindeki kacis dizileri
     "number": "#E08B54",
-    "function": "#8FD9C0",   # nane: cagrilar
+    "function": "#8FD9C0",   # cagrilar
+    "class": "#EAF2ED",      # tanimlanan sinif ve fonksiyon adlari
     "decorator": "#D9A03C",
-    "class": "#E8EDEA",
+    "parametre": "#C3CBD6",  # normal tanimlayicilar
+    "operator": "#8A93A0",   # + - = == -> gibi isaretler
+    "punct": "#6E7A8C",      # parantez, virgul
+    "comment": "#4E5654",
 }
+
+# Dile ozgu hazir isimler: kullanicinin yazdigi adlardan ayrilsin diye
+BUILTINS = {
+    "python": {
+        "print", "len", "range", "str", "int", "float", "bool", "list", "dict",
+        "set", "tuple", "open", "type", "isinstance", "enumerate", "zip", "map",
+        "filter", "sorted", "sum", "min", "max", "abs", "round", "super",
+        "property", "staticmethod", "classmethod", "Exception", "ValueError",
+        "TypeError", "KeyError", "IndexError", "RuntimeError", "OSError",
+    },
+    "javascript": {
+        "console", "document", "window", "JSON", "Math", "Array", "Object",
+        "String", "Number", "Boolean", "Promise", "Map", "Set", "Date",
+        "parseInt", "parseFloat", "fetch", "setTimeout", "setInterval",
+    },
+    "java": {
+        "System", "String", "Integer", "Double", "Boolean", "List", "Map",
+        "ArrayList", "HashMap", "Exception", "Math", "Optional", "Stream",
+    },
+    "shell": {"echo", "cd", "ls", "cat", "grep", "curl", "git", "python", "npm", "pip"},
+}
+OZEL_ISARETCILER = {"self", "this", "cls", "super", "base"}
+SABITLER = {"True", "False", "None", "null", "true", "false", "undefined", "nil", "NULL"}
 
 
 def dil_bul(yol: str | Path) -> str:
@@ -128,33 +163,74 @@ class Highlighter(QSyntaxHighlighter):
         bilgi = DILLER.get(dil, DILLER["markdown"])
         self.kurallar = []
 
-        # anahtar kelimeler
-        if bilgi["kw"]:
-            bicim = self._format(RENKLER["keyword"])
-            desen = r"\b(" + "|".join(sorted(set(bilgi["kw"]), key=len, reverse=True)) + r")\b"
-            self.kurallar.append((QRegularExpression(desen), bicim))
+        # Sira onemlidir: sonra eklenen kural onceki rengi ezer, bu yuzden
+        # genel olandan ozele dogru gidilir.
 
-        # sinif / fonksiyon adlari
+        # 1) isaretler ve noktalama en altta
+        self.kurallar.append((
+            QRegularExpression(r"[+\-*/%=<>!&|^~]+"), self._format(RENKLER["operator"])
+        ))
+        self.kurallar.append((
+            QRegularExpression(r"[\(\)\[\]\{\},;:]"), self._format(RENKLER["punct"])
+        ))
+
+        # 2) cagrilar
+        self.kurallar.append((
+            QRegularExpression(r"\b(\w+)(?=\s*\()"), self._format(RENKLER["function"])
+        ))
+
+        # 3) dilin hazir isimleri, kullanicinin yazdiklarindan ayrilsin
+        hazir = BUILTINS.get(dil, set())
+        if hazir:
+            desen = r"\b(" + "|".join(sorted(hazir, key=len, reverse=True)) + r")\b"
+            self.kurallar.append((
+                QRegularExpression(desen), self._format(RENKLER["builtin"])
+            ))
+
+        # 4) sayilar
+        self.kurallar.append((
+            QRegularExpression(
+                r"\b0[xXbBoO][0-9a-fA-F_]+\b|\b\d[\d_]*(\.\d+)?([eE][+-]?\d+)?\b"
+            ),
+            self._format(RENKLER["number"]),
+        ))
+
+        # 5) anahtar kelimeler
+        if bilgi["kw"]:
+            anahtarlar = sorted(set(bilgi["kw"]) - SABITLER, key=len, reverse=True)
+            if anahtarlar:
+                desen = r"\b(" + "|".join(anahtarlar) + r")\b"
+                self.kurallar.append((
+                    QRegularExpression(desen), self._format(RENKLER["keyword"])
+                ))
+
+        # 6) sabitler ve ozel isaretciler
+        self.kurallar.append((
+            QRegularExpression(r"\b(" + "|".join(sorted(SABITLER)) + r")\b"),
+            self._format(RENKLER["literal"]),
+        ))
+        self.kurallar.append((
+            QRegularExpression(r"\b(" + "|".join(sorted(OZEL_ISARETCILER)) + r")\b"),
+            self._format(RENKLER["self"], italik=True),
+        ))
+
+        # 7) tanimlanan sinif ve fonksiyon adlari, dekoratorler
         self.kurallar.append((
             QRegularExpression(r"\b(?:class|def|function|fun|interface|struct)\s+(\w+)"),
             self._format(RENKLER["class"], kalin=True),
         ))
         self.kurallar.append((
-            QRegularExpression(r"\b(\w+)(?=\s*\()"), self._format(RENKLER["function"])
-        ))
-        # sayilar
-        self.kurallar.append((
-            QRegularExpression(r"\b\d+(\.\d+)?([eE][+-]?\d+)?\b"),
-            self._format(RENKLER["number"]),
-        ))
-        # dekorator / etiket
-        self.kurallar.append((
-            QRegularExpression(r"@\w+"), self._format(RENKLER["decorator"])
+            QRegularExpression(r"@[\w.]+"), self._format(RENKLER["decorator"])
         ))
         # metinler
         metin = self._format(RENKLER["string"])
         for desen in (r'"[^"\\]*(\\.[^"\\]*)*"', r"'[^'\\]*(\\.[^'\\]*)*'", r"`[^`]*`"):
             self.kurallar.append((QRegularExpression(desen), metin))
+        # metin icindeki kacis dizileri metinden bir ton ayrilsin
+        self.kurallar.append((
+            QRegularExpression(r"\\[nrtvbf0'\"\\]|\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}"),
+            self._format(RENKLER["escape"]),
+        ))
 
         # yorumlar
         yorum = self._format(RENKLER["comment"], italik=True)
@@ -244,11 +320,7 @@ class CodeEditor(QPlainTextEdit):
         self.setObjectName("CodeEdit")
         self.satir_alani = _SatirNoAlani(self)
 
-        yazi = QFont("Cascadia Mono")
-        if not yazi.exactMatch():
-            yazi = QFont("Consolas")
-        yazi.setStyleHint(QFont.StyleHint.Monospace)
-        yazi.setPointSize(font_size)
+        yazi = platform_.kod_yazi_tipi(font_size)
         self.setFont(yazi)
         self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 4)
         self.setWordWrapMode(QTextOption.WrapMode.NoWrap)
@@ -339,41 +411,12 @@ class EditorTabs(QTabWidget):
     def __init__(self, parent=None, font_size: int = 13) -> None:
         super().__init__(parent)
         self.font_size = font_size
-        self.setTabsClosable(True)
+        self.setTabsClosable(False)   # kapatma dugmesini kendimiz koyuyoruz
         self.setMovable(True)
         self.setDocumentMode(True)
         self.tabCloseRequested.connect(self.sekme_kapat)
         self.currentChanged.connect(lambda _: self.durum_degisti.emit())
         self.acik: dict[str, CodeEditor] = {}   # mutlak yol -> editor
-        self.setStyleSheet(self._stil())
-
-    @staticmethod
-    def _stil() -> str:
-        return f"""
-        QTabWidget::pane {{ border: none; background: {C['bg0']}; }}
-        QTabBar {{ background: {C['bg1']}; qproperty-drawBase: 0; }}
-        QTabBar::tab {{
-            background: {C['bg1']};
-            color: {C['muted']};
-            border: none;
-            border-right: 1px solid {C['line']};
-            padding: 8px 14px;
-            min-width: 70px;
-            font-size: 12.5px;
-        }}
-        QTabBar::tab:selected {{
-            background: {C['bg0']};
-            color: {C['text']};
-            border-top: 2px solid {C['accent']};
-        }}
-        QTabBar::tab:hover:!selected {{ background: {C['bg3']}; color: {C['text2']}; }}
-        QTabBar::close-button {{
-            image: none;
-            subcontrol-position: right;
-            border-radius: 6px;
-        }}
-        QTabBar::close-button:hover {{ background: {C['bg4']}; }}
-        """
 
     # ---------- dosya islemleri ----------
 
@@ -404,7 +447,9 @@ class EditorTabs(QTabWidget):
             )
             self.acik[yol] = editor
             self.addTab(editor, p.name)
-            self.setTabToolTip(self.indexOf(editor), yol)
+            idx = self.indexOf(editor)
+            self.setTabToolTip(idx, yol)
+            self._kapat_dugmesi_ekle(idx)
             self.setCurrentWidget(editor)
 
         if satir:
@@ -419,6 +464,26 @@ class EditorTabs(QTabWidget):
         editor.setFocus()
         self.durum_degisti.emit()
         return True
+
+    def _kapat_dugmesi_ekle(self, index: int) -> None:
+        """Sekmenin sagina kendi cizdigimiz kapatma dugmesini koyar."""
+        dugme = QToolButton()
+        dugme.setObjectName("TabClose")
+        dugme.setFixedSize(QSize(16, 16))
+        dugme.setIconSize(QSize(10, 10))
+        dugme.setIcon(ikon("capraz", C["muted"], 10))
+        dugme.setCursor(Qt.CursorShape.PointingHandCursor)
+        dugme.setToolTip(t("Sekmeyi kapat"))
+        dugme.setAutoRaise(True)
+        dugme.clicked.connect(lambda: self._dugmeden_kapat(dugme))
+        self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, dugme)
+
+    def _dugmeden_kapat(self, dugme) -> None:
+        """Sekme sirasi degisebildigi icin dugmeden indeksi anlik bulunur."""
+        for i in range(self.count()):
+            if self.tabBar().tabButton(i, QTabBar.ButtonPosition.RightSide) is dugme:
+                self.sekme_kapat(i)
+                return
 
     def _basligi_tazele(self, editor: CodeEditor) -> None:
         idx = self.indexOf(editor)
