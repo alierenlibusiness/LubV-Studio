@@ -11,7 +11,6 @@ APP_VERSION = "1.0"
 
 APP_DIR = Path.home() / ".lubv_studio"
 CONFIG_PATH = APP_DIR / "config.json"
-SESSIONS_DIR = APP_DIR / "sessions"
 MEMORY_DIR = APP_DIR / "memory"
 
 # DeepSeek'in guncel modelleri. Uygulama acilista /models ucundan gercek
@@ -162,7 +161,7 @@ class Config:
 
     @staticmethod
     def ensure_dirs() -> None:
-        for path in (APP_DIR, SESSIONS_DIR, MEMORY_DIR):
+        for path in (APP_DIR, MEMORY_DIR):
             path.mkdir(parents=True, exist_ok=True)
 
     # ---------- yardimcilar ----------

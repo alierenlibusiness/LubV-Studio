@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QTextCursor
+from PySide6.QtCore import QProcess, Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QTextCursor
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout,
 )
 
 from .icons import ikon
@@ -31,8 +32,6 @@ def _mono(size: int = 12) -> QFont:
 class Terminal(QFrame):
     """Proje klasorunde acilan, durumunu koruyan PowerShell oturumu."""
 
-    calisma_bitti = Signal()
-
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("TerminalPanel")
@@ -48,10 +47,11 @@ class Terminal(QFrame):
         # ust seritte baslik ve butonlar
         serit = QFrame()
         serit.setObjectName("TopBar")
-        serit.setFixedHeight(32)
+        serit.setFixedHeight(34)
         s_duzen = QHBoxLayout(serit)
         s_duzen.setContentsMargins(12, 0, 8, 0)
-        s_duzen.setSpacing(8)
+        s_duzen.setSpacing(6)
+        s_duzen.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         simge = QLabel()
         simge.setPixmap(ikon("terminal", C["muted"], 14).pixmap(14, 14))
@@ -64,13 +64,13 @@ class Terminal(QFrame):
 
         temizle = QPushButton(t("Temizle"))
         temizle.setProperty("kind", "ghost")
-        temizle.setFixedHeight(22)
+        temizle.setProperty("size", "compact")
         temizle.setToolTip(t("Ekrandaki çıktıyı siler"))
         temizle.clicked.connect(self.temizle)
 
         durdur = QPushButton(t("Yeniden başlat"))
         durdur.setProperty("kind", "ghost")
-        durdur.setFixedHeight(22)
+        durdur.setProperty("size", "compact")
         durdur.setToolTip(t("Çalışan komutu keser ve kabuğu yeniden başlatır"))
         durdur.clicked.connect(self.yeniden_baslat)
 
@@ -124,7 +124,6 @@ class Terminal(QFrame):
         self.proc.setWorkingDirectory(self.cwd)
         self.proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self.proc.readyReadStandardOutput.connect(self._oku)
-        self.proc.finished.connect(lambda *_: self.calisma_bitti.emit())
         kabuk = "powershell.exe"
         self.proc.start(
             kabuk,
@@ -134,7 +133,7 @@ class Terminal(QFrame):
             self._yaz(t("PowerShell oturumu açıldı") + f"  ·  {self.cwd}\n", C["muted"])
             self.calistir("$ProgressPreference='SilentlyContinue'", sessiz=True)
         else:
-            self._yaz("PowerShell baslatilamadi.\n", C["red"])
+            self._yaz(t("PowerShell başlatılamadı.") + "\n", C["red"])
 
     def _kabugu_kapat(self) -> None:
         if self.proc is not None:
@@ -157,7 +156,7 @@ class Terminal(QFrame):
         if self.proc is None or self.proc.state() != QProcess.ProcessState.Running:
             self.yeniden_baslat()
         if self.proc is None:
-            self._yaz("Terminal hazir degil. Once proje klasoru sec.\n", C["red"])
+            self._yaz(t("Terminal hazır değil. Önce proje klasörü seç.") + "\n", C["red"])
             return
         if not sessiz:
             self._yaz(f"\n❯ {komut}\n", C["accent_hi"])
@@ -192,6 +191,17 @@ class Terminal(QFrame):
         self.cikti.setTextCursor(imlec)
         self.cikti.ensureCursorVisible()
 
+    def ajan_ciktisi(self, komut: str, cikti: str, basarili: bool) -> None:
+        """LUBV bir komut calistirdiginda burada da gorunsun.
+
+        Ajan kendi kabugunda calisir; buraya yazmasak kullanici ne yapildigini
+        sadece sohbet kartinda gorurdu. Her sey tek yerde toplansin diye
+        komut ve ciktisi terminale de dusulur.
+        """
+        self._yaz(f"\n[LUBV] ❯ {komut}\n", C["violet"])
+        kirpik = cikti if len(cikti) <= 4000 else cikti[:4000] + "\n... (kirpildi)"
+        self._yaz(kirpik.rstrip() + "\n", C["text2"] if basarili else C["red"])
+
     def temizle(self) -> None:
         self.cikti.clear()
 
@@ -224,8 +234,6 @@ class Terminal(QFrame):
 
 def git_calistir(cwd: str, *args: str, timeout: int = 30) -> tuple[bool, str]:
     """Tek seferlik git komutu (panel icin, ciktiyi programa alir)."""
-    import subprocess
-
     if not cwd:
         return False, t("Proje klasörü yok.")
     try:
@@ -237,14 +245,16 @@ def git_calistir(cwd: str, *args: str, timeout: int = 30) -> tuple[bool, str]:
         return False, t("Git bulunamadı. https://git-scm.com adresinden kur.")
     except Exception as exc:
         return False, str(exc)
-    return proc.returncode == 0, ((proc.stdout or "") + (proc.stderr or "")).strip()
+    # Sadece sondaki bosluklar atilir: `status --porcelain` ciktisinda ilk iki
+    # sutun durum kodudur ve bastaki bosluk anlamlidir, strip() onu yiyip
+    # dosya adinin ilk harfini kirpiyordu.
+    return proc.returncode == 0, ((proc.stdout or "") + (proc.stderr or "")).rstrip()
 
 
 class GitPanel(QFrame):
     """Degisiklikleri gor, commit'le, GitHub'a gonder."""
 
     komut_istendi = Signal(str)   # terminalde calistirilacak komut
-    yenile_istendi = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -300,10 +310,29 @@ class GitPanel(QFrame):
 
         uzak_baslik = QLabel(t("GITHUB"))
         uzak_baslik.setObjectName("SectionLabel")
+
+        self.hesap_etiketi = QLabel("")
+        self.hesap_etiketi.setObjectName("PanelHint")
+        self.hesap_etiketi.setWordWrap(True)
+
         self.uzak = QLineEdit()
-        self.uzak.setPlaceholderText("https://github.com/kullanici/repo.git")
-        btn_uzak = QPushButton(t("Uzak depoyu bağla ve gönder"))
+        self.uzak.setPlaceholderText("kullanici/repo")
+        self.uzak.setToolTip(
+            "kullanici/repo  ·  https://github.com/kullanici/repo  ·  git@github.com:..."
+        )
+        self.uzak.returnPressed.connect(self.uzak_bagla)
+
+        satir3 = QHBoxLayout()
+        satir3.setSpacing(6)
+        self.btn_yeni_repo = QPushButton(t("GitHub'da repo aç"))
+        self.btn_yeni_repo.setToolTip(t("Yeni bir depo oluşturur ve projeyi gönderir"))
+        self.btn_yeni_repo.clicked.connect(self.github_repo_olustur)
+        btn_uzak = QPushButton(t("Bağla ve gönder"))
+        btn_uzak.setProperty("kind", "primary")
+        btn_uzak.setToolTip(t("Var olan bir depoya bağlanır ve projeyi gönderir"))
         btn_uzak.clicked.connect(self.uzak_bagla)
+        satir3.addWidget(self.btn_yeni_repo, 1)
+        satir3.addWidget(btn_uzak, 1)
 
         duzen.addWidget(baslik)
         duzen.addWidget(self.dal_etiketi)
@@ -313,14 +342,16 @@ class GitPanel(QFrame):
         duzen.addLayout(satir2)
         duzen.addSpacing(6)
         duzen.addWidget(uzak_baslik)
+        duzen.addWidget(self.hesap_etiketi)
         duzen.addWidget(self.uzak)
-        duzen.addWidget(btn_uzak)
+        duzen.addLayout(satir3)
 
     # ---------- durum ----------
 
     def set_cwd(self, yol: str) -> None:
         self.cwd = yol
         self.yenile()
+        self.hesabi_tazele()
 
     def yenile(self) -> None:
         self.liste.clear()
@@ -331,7 +362,7 @@ class GitPanel(QFrame):
         tamam, dal = git_calistir(self.cwd, "rev-parse", "--abbrev-ref", "HEAD")
         if not tamam:
             self.dal_etiketi.setText(t("bu klasör bir git deposu değil"))
-            self.liste.addItem(QListWidgetItem(t("Bu klasörde depo yok. Aşağıdan t('Depo kur') de.")))
+            self.liste.addItem(QListWidgetItem(t("Bu klasörde git deposu yok.")))
             return
 
         _, uzak = git_calistir(self.cwd, "remote", "get-url", "origin")
@@ -339,6 +370,7 @@ class GitPanel(QFrame):
         self.dal_etiketi.setText(t("dal: ") + dal.strip() + "  ·  " + uzak_bilgi)
         if uzak_bilgi != t("uzak depo yok"):
             self.uzak.setText(uzak_bilgi)
+            self.uzak.setCursorPosition(0)   # uzun adreste bas gorunsun
 
         tamam, durum = git_calistir(self.cwd, "status", "--porcelain")
         if not durum.strip():
@@ -365,6 +397,8 @@ class GitPanel(QFrame):
     # ---------- eylemler ----------
 
     def commit_et(self) -> None:
+        if not self.kimligi_saglat():
+            return
         mesaj = self.mesaj.text().strip()
         if not mesaj:
             self.mesaj.setPlaceholderText(t("önce bir commit mesajı yaz"))
@@ -375,16 +409,177 @@ class GitPanel(QFrame):
         self.mesaj.clear()
 
     def depo_kur(self) -> None:
+        if not self.kimligi_saglat():
+            return
         self.komut_istendi.emit(
-            'git init; git add -A; git commit -m "ilk commit"'
+            'git init; git add -A; git commit -m "Initial commit"'
+        )
+
+    # ---------- git kimligi ----------
+
+    def _kimlik_var_mi(self) -> bool:
+        ad = git_calistir(self.cwd, "config", "user.name")[1].strip()
+        posta = git_calistir(self.cwd, "config", "user.email")[1].strip()
+        return bool(ad and posta)
+
+    def kimligi_saglat(self) -> bool:
+        """Commit atabilmek icin git kimligi sart. Yoksa bir kez sorup kaydeder."""
+        if self._kimlik_var_mi():
+            return True
+
+        # GitHub CLI girisliyse oradan on doldur
+        varsayilan_ad, varsayilan_posta = "", ""
+        _, kullanici = self._gh_durumu()
+        if kullanici:
+            varsayilan_ad = kullanici
+            varsayilan_posta = f"{kullanici}@users.noreply.github.com"
+
+        ad, tamam = QInputDialog.getText(
+            self, t("Git kimliği"),
+            t("Commit'lerde görünecek isim:"), text=varsayilan_ad,
+        )
+        if not tamam or not ad.strip():
+            return False
+        posta, tamam = QInputDialog.getText(
+            self, t("Git kimliği"),
+            t("Commit'lerde görünecek e-posta:"), text=varsayilan_posta,
+        )
+        if not tamam or not posta.strip():
+            return False
+
+        for anahtar, deger in (("user.name", ad.strip()), ("user.email", posta.strip())):
+            git_calistir(self.cwd, "config", "--global", anahtar, deger)
+
+        if not self._kimlik_var_mi():
+            QMessageBox.warning(
+                self, t("Git kimliği"), t("Kimlik kaydedilemedi, terminalden dene.")
+            )
+            return False
+        return True
+
+    # ---------- GitHub ----------
+
+    def _gh_durumu(self) -> tuple[bool, str]:
+        """GitHub CLI kurulu ve giris yapilmis mi? (kurulu_mu, kullanici_adi)"""
+        try:
+            proc = subprocess.run(
+                ["gh", "auth", "status"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=10,
+            )
+        except FileNotFoundError:
+            return False, ""
+        except Exception:
+            return False, ""
+        cikti = (proc.stdout or "") + (proc.stderr or "")
+        es = re.search(r"account\s+(\S+)", cikti) or re.search(r"as\s+(\S+)", cikti)
+        return True, (es.group(1) if es and proc.returncode == 0 else "")
+
+    def hesabi_tazele(self) -> None:
+        kurulu, kullanici = self._gh_durumu()
+        if not kurulu:
+            self.hesap_etiketi.setText(t("GitHub CLI kurulu değil, repo adresini elle yapıştır"))
+            self.btn_yeni_repo.setEnabled(True)
+        elif kullanici:
+            self.hesap_etiketi.setText(t("GitHub hesabı: ") + kullanici)
+            self.btn_yeni_repo.setEnabled(True)
+        else:
+            self.hesap_etiketi.setText(t("GitHub CLI kurulu ama giriş yapılmamış"))
+            self.btn_yeni_repo.setEnabled(True)
+
+    @staticmethod
+    def github_adresi(metin: str) -> str:
+        """kullanici/repo, github.com/... veya tam URL girdisini tek bicime cevirir."""
+        ham = (metin or "").strip().strip('"').strip("'").rstrip("/")
+        if not ham:
+            return ""
+        if ham.startswith("git@") or ham.startswith("ssh://"):
+            return ham
+        if ham.startswith("http://"):
+            ham = "https://" + ham[len("http://"):]
+        if ham.startswith("https://"):
+            return ham
+        if ham.startswith("github.com/") or ham.startswith("www.github.com/"):
+            return "https://" + ham.removeprefix("www.")
+        if re.fullmatch(r"[\w.-]+/[\w.-]+", ham):
+            return f"https://github.com/{ham}"
+        return ""
+
+    def _ilk_commit_komutu(self) -> str:
+        """Depo yoksa kurar, hic commit yoksa bir tane atar. Varsa hicbir sey yapmaz.
+
+        Commit var mi kontrolu cikis koduyla yapilir: bos depoda
+        `git rev-parse HEAD` stdout'a "HEAD" yazdigi icin ciktiya bakmak yanlis
+        sonuc verir ve ilk commit hic atilmaz.
+        """
+        return (
+            "if (-not (Test-Path .git)) { git init | Out-Null }; "
+            "git rev-parse --verify -q HEAD > $null 2>&1; "
+            'if ($LASTEXITCODE -ne 0) { git add -A; git commit -m "Initial commit" | Out-Null }; '
         )
 
     def uzak_bagla(self) -> None:
-        url = self.uzak.text().strip()
-        if not url:
+        if not self.kimligi_saglat():
+            return
+        adres = self.github_adresi(self.uzak.text())
+        if not adres:
+            QMessageBox.warning(
+                self, t("GITHUB"),
+                t("Geçerli bir depo adresi yaz. Örnek: kullanici/repo"),
+            )
             self.uzak.setFocus()
             return
+
         self.komut_istendi.emit(
-            f'git remote remove origin 2>$null; git remote add origin "{url}"; '
-            "git branch -M main; git push -u origin main"
+            self._ilk_commit_komutu()
+            + "git remote remove origin 2>$null; "
+            + f'git remote add origin "{adres}"; '
+            + "git branch -M main; git push -u origin main"
         )
+
+    def github_repo_olustur(self) -> None:
+        if not self.cwd or not self.kimligi_saglat():
+            return
+        kurulu, kullanici = self._gh_durumu()
+
+        if not kurulu:
+            cevap = QMessageBox.question(
+                self, t("GITHUB"),
+                t(
+                    "Uygulama içinden repo açmak için GitHub CLI gerekiyor "
+                    "(cli.github.com). Şimdi tarayıcıda yeni repo sayfasını "
+                    "açayım mı? Sonra adresi yukarıdaki kutuya yapıştır."
+                ),
+            )
+            if cevap == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl("https://github.com/new"))
+            return
+
+        if not kullanici:
+            cevap = QMessageBox.question(
+                self, t("GITHUB"),
+                t("GitHub CLI kurulu ama giriş yapılmamış. Giriş başlatılsın mı?"),
+            )
+            if cevap == QMessageBox.StandardButton.Yes:
+                self.komut_istendi.emit("gh auth login --web --git-protocol https")
+            return
+
+        varsayilan = Path(self.cwd).name
+        ad, tamam = QInputDialog.getText(
+            self, t("GitHub'da repo aç"), t("Depo adı:"), text=varsayilan
+        )
+        if not tamam or not ad.strip():
+            return
+        ad = re.sub(r"[^\w.-]+", "-", ad.strip())
+
+        gorunurluk = QMessageBox.question(
+            self, t("GitHub'da repo aç"),
+            t("Depo herkese açık (public) olsun mu? Hayır dersen özel (private) olur."),
+        )
+        bayrak = "--public" if gorunurluk == QMessageBox.StandardButton.Yes else "--private"
+
+        self.komut_istendi.emit(
+            self._ilk_commit_komutu()
+            + "git branch -M main; "
+            + f'gh repo create "{ad}" {bayrak} --source=. --remote=origin --push'
+        )
+        self.uzak.setText(f"{kullanici}/{ad}")

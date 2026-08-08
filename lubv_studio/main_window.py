@@ -268,6 +268,7 @@ class MainWindow(QMainWindow):
         self.sohbet.proje_degisti.connect(self._proje_tazele)
         self.sohbet.bellek_degisti.connect(self.bellek_panel_tazele)
         self.sohbet.kullanim_degisti.connect(self._durum_tazele)
+        self.sohbet.komut_calisti.connect(self._ajan_komutu)
 
     def _kisayollar(self) -> None:
         def kisayol(dizi: str, islev) -> None:
@@ -406,6 +407,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Terminal / git
     # ------------------------------------------------------------------
+
+    def _ajan_komutu(self, komut: str, cikti: str, basarili: bool) -> None:
+        """Ajanin calistirdigi komut terminal panelinde de gorunsun."""
+        self.terminal.ajan_ciktisi(komut, cikti, basarili)
 
     def _terminalde_calistir(self, komut: str) -> None:
         self.terminal.setVisible(True)

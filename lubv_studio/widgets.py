@@ -62,13 +62,6 @@ class Badge(QLabel):
         self.style().polish(self)
 
 
-class Divider(QFrame):
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setObjectName("Divider")
-        self.setFixedHeight(1)
-
-
 class AutoTextBrowser(QTextBrowser):
     """Icerigi kadar yer kaplayan, kaydirmasiz metin alani."""
 
@@ -144,10 +137,6 @@ class MessageBubble(QFrame):
         self.ham += parca
         self.govde.set_markdown(self.ham)
 
-    def set_text(self, metin: str) -> None:
-        self.ham = metin
-        self.govde.set_markdown(metin)
-
     def bos_mu(self) -> bool:
         return not self.ham.strip()
 
@@ -206,8 +195,6 @@ class ReasoningBox(QFrame):
 
 class ToolCard(QFrame):
     """Bir arac cagrisinin gorsel karti."""
-
-    dosya_ac_istendi = Signal(str)
 
     def __init__(self, call: ToolCall, parent=None) -> None:
         super().__init__(parent)

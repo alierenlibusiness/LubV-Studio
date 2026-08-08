@@ -148,12 +148,3 @@ class CheckpointStore:
             if not kok or str(Path(c.project_root or "").resolve() if c.project_root else "") == kok
         ]
 
-    def purge(self) -> None:
-        for c in self.items:
-            if c.blob:
-                try:
-                    (CHECKPOINT_DIR / c.blob).unlink(missing_ok=True)
-                except Exception:
-                    pass
-        self.items = []
-        self.save()
