@@ -368,6 +368,53 @@ EN: dict[str, str] = {
     "Kabuk kapandı": "The shell exited",
     "Yeniden başlat.": "Restart it.",
 
+    # ---- ajan dongusu bildirimleri ----
+    "Beklenmeyen hata": "Unexpected error",
+    "Akış kesildi, kaldığı yerden devam ediliyor.":
+        "The stream was cut, continuing from where it stopped.",
+    "Bağlantı sorunu, tekrar deneniyor": "Connection problem, retrying",
+    "Model boş cevap döndü, tekrar soruluyor.":
+        "The model returned an empty answer, asking again.",
+    "İşlem belirlenen adım sayısında bitmedi ve durduruldu":
+        "The task did not finish within the step limit and was stopped",
+    "Sınırsız çalışması için Ayarlar'dan adım limitini 0 yap.":
+        "Set the step limit to 0 in Settings to let it run without a limit.",
+    "Aynı işlem üst üste aynı hatayı verdi ve ilerleme "
+    "olmadı, döngü durduruldu. Araç kartındaki hataya "
+    "bakıp yeni bir yön ver.":
+        "The same action failed the same way repeatedly with no progress, so "
+        "the loop was stopped. Read the error on the tool card and give it a "
+        "different direction.",
+
+    # ---- API hatalari ----
+    "İstek geçersiz (400). Model adı veya parametreler hatalı olabilir.":
+        "Invalid request (400). The model name or parameters may be wrong.",
+    "API anahtarı geçersiz (401). Ayarlar'dan anahtarı kontrol et.":
+        "Invalid API key (401). Check the key in Settings.",
+    "Bakiye yetersiz (402). DeepSeek hesabına kredi yüklemen gerekiyor.":
+        "Insufficient balance (402). You need to top up your DeepSeek account.",
+    "Erişim reddedildi (403). Anahtarın bu modele yetkisi yok.":
+        "Access denied (403). This key is not authorised for that model.",
+    "Adres bulunamadı (404). Base URL yanlış olabilir.":
+        "Not found (404). The base URL may be wrong.",
+    "Parametre hatası (422). Sıcaklık veya token değerleri aralığın dışında.":
+        "Parameter error (422). Temperature or token values are out of range.",
+    "Çok fazla istek (429). Birkaç saniye bekleyip tekrar dene.":
+        "Too many requests (429). Wait a few seconds and try again.",
+    "DeepSeek sunucu hatası (500). Biraz sonra tekrar dene.":
+        "DeepSeek server error (500). Try again shortly.",
+    "Sunucu meşgul (503). Model şu an aşırı yüklü.":
+        "Server busy (503). The model is overloaded right now.",
+    "API hatası": "API error",
+    "API anahtarı boş.": "The API key is empty.",
+    "Bağlantı kurulamadı": "Could not connect",
+    "Bağlantı kurulamadı.": "Could not connect.",
+    "Bağlantı hatası": "Connection error",
+    "Akış kesildi": "The stream was cut",
+    "Bakiye bilgisi boş döndü.": "The balance response was empty.",
+    "Bakiye okunamadı": "Could not read the balance",
+    "Bağlantı başarılı. Kalan bakiye": "Connected. Remaining balance",
+
     # ---- arac karti sonuclari ----
     "satır": "lines",
     "boş dosya": "empty file",

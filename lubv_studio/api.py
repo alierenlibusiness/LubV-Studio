@@ -9,9 +9,29 @@ from typing import Iterator
 
 import requests
 
+from .i18n import t
+
 
 class ApiError(Exception):
-    """Kullaniciya gosterilebilir, Turkce aciklamali API hatasi."""
+    """Kullaniciya gosterilebilir, arayuz diline cevrilmis API hatasi.
+
+    `gecici` alani "beklersem duzelir mi" sorusunu cevaplar. Ajan dongusu bu
+    alana bakarak yeniden deneyip denemeyecegine karar verir; mesaj metnine
+    bakmak ceviri acilinca bozulan bir yontemdi.
+
+    Varsayilan None, yani "bilinmiyor": cagiran bilerek isaretlemediyse karar
+    metin sezgilerine birakilir. False verilseydi, ileride biri gecici bir
+    hatayi isaretlemeyi unuttugunda hata sessizce kalici sayilir ve yeniden
+    deneme hic calismazdi.
+    """
+
+    def __init__(self, mesaj: str, gecici: bool | None = None) -> None:
+        super().__init__(mesaj)
+        self.gecici = gecici
+
+
+# Beklemek fayda eden durum kodlari: sunucu tarafli veya hiz siniri
+GECICI_KODLAR = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
 @dataclass
@@ -45,16 +65,18 @@ class Bakiye:
         return self.gecerli and self.tutar < 1.0
 
 
+# Bu mesajlar dogrudan sohbet ekranina dusuyor, o yuzden arayuz diline cevrilir.
+# Anahtarlar HTTP durum kodu, degerler ceviri tablosundaki Turkce kaynak metin.
 HATA_MESAJLARI = {
-    400: "Istek gecersiz (400). Model adi veya parametreler hatali olabilir.",
-    401: "API anahtari gecersiz (401). Ayarlar'dan anahtari kontrol et.",
-    402: "Bakiye yetersiz (402). DeepSeek hesabina kredi yuklemen gerekiyor.",
-    403: "Erisim reddedildi (403). Anahtarin bu modele yetkisi yok.",
-    404: "Adres bulunamadi (404). Base URL yanlis olabilir.",
-    422: "Parametre hatasi (422). Sicaklik veya token degerleri araligin disinda.",
-    429: "Cok fazla istek (429). Birkac saniye bekleyip tekrar dene.",
-    500: "DeepSeek sunucu hatasi (500). Biraz sonra tekrar dene.",
-    503: "Sunucu mesgul (503). Model su an asiri yuklu.",
+    400: "İstek geçersiz (400). Model adı veya parametreler hatalı olabilir.",
+    401: "API anahtarı geçersiz (401). Ayarlar'dan anahtarı kontrol et.",
+    402: "Bakiye yetersiz (402). DeepSeek hesabına kredi yüklemen gerekiyor.",
+    403: "Erişim reddedildi (403). Anahtarın bu modele yetkisi yok.",
+    404: "Adres bulunamadı (404). Base URL yanlış olabilir.",
+    422: "Parametre hatası (422). Sıcaklık veya token değerleri aralığın dışında.",
+    429: "Çok fazla istek (429). Birkaç saniye bekleyip tekrar dene.",
+    500: "DeepSeek sunucu hatası (500). Biraz sonra tekrar dene.",
+    503: "Sunucu meşgul (503). Model şu an aşırı yüklü.",
 }
 
 
@@ -80,7 +102,7 @@ class DeepSeekClient:
         return f"{self.base_url}/v1{yol}"
 
     def _hata(self, response: requests.Response) -> ApiError:
-        mesaj = HATA_MESAJLARI.get(response.status_code)
+        ham = HATA_MESAJLARI.get(response.status_code)
         detay = ""
         try:
             govde = response.json()
@@ -91,9 +113,11 @@ class DeepSeekClient:
             ) or ""
         except Exception:
             detay = (response.text or "")[:300]
-        if not mesaj:
-            mesaj = f"API hatasi ({response.status_code})."
-        return ApiError(f"{mesaj}\n{detay}".strip())
+        mesaj = t(ham) if ham else f"{t('API hatası')} ({response.status_code})."
+        return ApiError(
+            f"{mesaj}\n{detay}".strip(),
+            gecici=response.status_code in GECICI_KODLAR,
+        )
 
     # ---------- baglanti testi ----------
 
@@ -102,7 +126,7 @@ class DeepSeekClient:
         import time as _time
 
         if not self.api_key:
-            return Bakiye(mesaj="API anahtari girilmemis.", zaman=_time.time())
+            return Bakiye(mesaj=t("API anahtarı girilmemiş."), zaman=_time.time())
         try:
             resp = self._session.get(
                 f"{self.base_url}/user/balance",
@@ -110,7 +134,7 @@ class DeepSeekClient:
                 timeout=zaman_asimi,
             )
         except requests.RequestException as exc:
-            return Bakiye(mesaj=f"Baglanti kurulamadi: {exc}", zaman=_time.time())
+            return Bakiye(mesaj=f"{t('Bağlantı kurulamadı')}: {exc}", zaman=_time.time())
 
         if resp.status_code != 200:
             return Bakiye(mesaj=str(self._hata(resp)), zaman=_time.time())
@@ -119,7 +143,7 @@ class DeepSeekClient:
             veri = resp.json()
             bilgiler = veri.get("balance_infos") or []
             if not bilgiler:
-                return Bakiye(mesaj="Bakiye bilgisi bos dondu.", zaman=_time.time())
+                return Bakiye(mesaj=t("Bakiye bilgisi boş döndü."), zaman=_time.time())
             bilgi = bilgiler[0]
             return Bakiye(
                 tutar=float(bilgi.get("total_balance") or 0.0),
@@ -128,15 +152,15 @@ class DeepSeekClient:
                 zaman=_time.time(),
             )
         except Exception as exc:
-            return Bakiye(mesaj=f"Bakiye okunamadi: {exc}", zaman=_time.time())
+            return Bakiye(mesaj=f"{t('Bakiye okunamadı')}: {exc}", zaman=_time.time())
 
     def test(self) -> str:
         if not self.api_key:
-            raise ApiError("API anahtari bos.")
+            raise ApiError(t("API anahtarı boş."), gecici=False)
         durum = self.bakiye()
         if durum.gecerli:
-            return f"Baglanti basarili. Kalan bakiye: {durum.metin}"
-        raise ApiError(durum.mesaj or "Baglanti kurulamadi.")
+            return f"{t('Bağlantı başarılı. Kalan bakiye')}: {durum.metin}"
+        raise ApiError(durum.mesaj or t("Bağlantı kurulamadı."), gecici=False)
 
     # ---------- streaming sohbet ----------
 
@@ -161,7 +185,7 @@ class DeepSeekClient:
         cancel: threading.Event | None = None,
     ) -> Iterator[Delta]:
         if not self.api_key:
-            raise ApiError("API anahtari girilmemis.")
+            raise ApiError(t("API anahtarı girilmemiş."), gecici=False)
 
         govde = {
             "model": model,
@@ -184,7 +208,7 @@ class DeepSeekClient:
                 timeout=(20, 300),
             )
         except requests.RequestException as exc:
-            raise ApiError(f"Baglanti hatasi: {exc}") from None
+            raise ApiError(f"{t('Bağlantı hatası')}: {exc}", gecici=True) from None
 
         if resp.status_code != 200:
             hata = self._hata(resp)
@@ -219,6 +243,6 @@ class DeepSeekClient:
                 if icerik or dusunce:
                     yield Delta(content=icerik, reasoning=dusunce)
         except requests.RequestException as exc:
-            raise ApiError(f"Akis kesildi: {exc}") from None
+            raise ApiError(f"{t('Akış kesildi')}: {exc}", gecici=True) from None
         finally:
             resp.close()

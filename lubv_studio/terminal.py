@@ -13,10 +13,13 @@ import uuid
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QTextCursor
+from PySide6.QtGui import (
+    QColor, QDesktopServices, QFont, QFontMetrics, QTextCursor,
+)
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout,
+    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy,
+    QVBoxLayout,
 )
 
 from . import platform_
@@ -76,8 +79,17 @@ class Terminal(QFrame):
 
         self.baslik = QLabel(t("TERMINAL"))
         self.baslik.setObjectName("SectionLabel")
+
+        # Yol etiketi tam metni kadar genislik istiyordu; uzun bir proje yolu
+        # butun orta sutunu genisletiyor ve sol panel bir daha buyutulemiyordu.
+        # Etiket artik eline gecen alana sigar, yol bastan kirpilir.
         self.yol_etiketi = QLabel("")
         self.yol_etiketi.setObjectName("TopPath")
+        self.yol_etiketi.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        self.yol_etiketi.setMinimumWidth(0)
+        self._yol_ham = ""
 
         self.durum_rozet = QLabel("")
         self.durum_rozet.setObjectName("Badge")
@@ -146,7 +158,7 @@ class Terminal(QFrame):
         if yeni == self.cwd and self.hazir_mi():
             return   # ayni klasor icin kabugu bosuna yeniden baslatma
         self.cwd = yeni
-        self.yol_etiketi.setText(self.cwd)
+        self._yolu_yaz(self.cwd)
         self.yeniden_baslat()
 
     def hazir_mi(self) -> bool:
@@ -155,12 +167,27 @@ class Terminal(QFrame):
             and self.proc.state() == QProcess.ProcessState.Running
         )
 
+    def _yolu_yaz(self, yol: str) -> None:
+        """Yolu etikete sigacak sekilde, bastan kirparak yazar."""
+        self._yol_ham = yol or ""
+        olcum = QFontMetrics(self.yol_etiketi.font())
+        alan = max(60, self.yol_etiketi.width())
+        self.yol_etiketi.setText(
+            olcum.elidedText(self._yol_ham, Qt.TextElideMode.ElideLeft, alan)
+        )
+        self.yol_etiketi.setToolTip(self._yol_ham)
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        if self._yol_ham:
+            self._yolu_yaz(self._yol_ham)
+
     def yeniden_baslat(self) -> None:
         self.kabugu_kapat()
         self._durum_ayarla(False)
         self._tampon = ""
         if not self.cwd or not Path(self.cwd).is_dir():
-            self.yol_etiketi.setText(t("proje seçilmedi"))
+            self._yolu_yaz(t("proje seçilmedi"))
             return
 
         self.proc = QProcess(self)
@@ -321,7 +348,7 @@ class Terminal(QFrame):
         klasor = (es.group(2) or "").strip()
         if klasor and Path(klasor).is_dir():
             self.cwd = klasor
-            self.yol_etiketi.setText(klasor)
+            self._yolu_yaz(klasor)
 
         gecen = time.monotonic() - self._baslangic
         renk = C["muted"] if kod == "0" else C["red"]

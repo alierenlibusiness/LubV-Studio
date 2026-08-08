@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QByteArray, QSize, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -90,7 +90,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _pencereyi_yerlestir(self) -> None:
-        """Pencereyi ekrana sigdirir, panelleri oranli boler, ortalar."""
+        """Pencereyi ekrana sigdirir, panelleri oranli boler, ortalar.
+
+        Kullanici daha once pencereyi boyutlandirdiysa o duzen geri yuklenir;
+        ilk acilista asagidaki oranli yerlesim kullanilir.
+        """
+        if self._duzeni_geri_yukle():
+            return
+
         ekran = QApplication.primaryScreen()
         alan = ekran.availableGeometry() if ekran else None
         if alan is None:
@@ -114,6 +121,54 @@ class MainWindow(QMainWindow):
         # dikey: terminal alt seritte kalsin
         terminal = max(150, min(220, int(yukseklik * 0.22)))
         self.merkez_bolucu.setSizes([yukseklik - terminal, terminal])
+
+    # ---------- pencere duzeninin kaliciligi ----------
+
+    def _duzeni_geri_yukle(self) -> bool:
+        """Kayitli pencere boyutu ve bolucu konumlarini uygular.
+
+        Ekran duzeni degismis olabilir (monitor cikarilmis, cozunurluk
+        dusmus): geri yuklenen pencere gorunur alanin disinda kalirsa kayit
+        yok sayilir, yoksa uygulama ekran disinda aciliyor.
+        """
+        ham = (self.cfg.window_geometry or "").strip()
+        if not ham:
+            return False
+        try:
+            veri = QByteArray.fromBase64(ham.encode("ascii"))
+            if not self.restoreGeometry(veri):
+                return False
+        except Exception:
+            return False
+
+        ekran = QApplication.primaryScreen()
+        alan = ekran.availableGeometry() if ekran else None
+        if alan is not None and not alan.intersects(self.frameGeometry()):
+            return False   # eski konum artik ekranda degil, varsayilana don
+
+        bolucu = (self.cfg.splitter_state or "").strip()
+        if bolucu:
+            try:
+                yatay, _, dikey = bolucu.partition("|")
+                if yatay:
+                    self.bolucu.restoreState(QByteArray.fromBase64(yatay.encode("ascii")))
+                if dikey:
+                    self.merkez_bolucu.restoreState(
+                        QByteArray.fromBase64(dikey.encode("ascii"))
+                    )
+            except Exception:
+                pass
+        return True
+
+    def _duzeni_kaydet(self) -> None:
+        try:
+            self.cfg.window_geometry = bytes(self.saveGeometry().toBase64()).decode("ascii")
+            self.cfg.splitter_state = "|".join((
+                bytes(self.bolucu.saveState().toBase64()).decode("ascii"),
+                bytes(self.merkez_bolucu.saveState().toBase64()).decode("ascii"),
+            ))
+        except Exception:
+            pass
 
     def _arayuzu_kur(self) -> None:
         kok = QWidget()
@@ -639,5 +694,6 @@ class MainWindow(QMainWindow):
 
         self.sohbet.kapaniyor()
         self.terminal.kabugu_kapat()
+        self._duzeni_kaydet()
         self.cfg.save()
         super().closeEvent(event)
