@@ -1,215 +1,177 @@
-<div align="center">
+# LUBV Studio — Developer Guide
 
-# LUBV Studio
-
-**A desktop vibe coding agent powered by DeepSeek. The brain is yours.**
-
-No vendor system prompt. No hidden instruction layer. No opinionated guard rails
-bolted on top of your agent. You write the brain, LUBV executes it against your
-real project: reading files, writing code, running commands, searching the web.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-53FC18.svg?style=flat-square)](LICENSE)
-![Python](https://img.shields.io/badge/Python-3.10+-53FC18.svg?style=flat-square)
-![Platform](https://img.shields.io/badge/Platform-Windows-53FC18.svg?style=flat-square)
-![UI](https://img.shields.io/badge/UI-PySide6-53FC18.svg?style=flat-square)
-
-![LUBV Studio](docs/screenshot.png)
-
-</div>
+> This is the `develop` branch: the integration branch where work lands before
+> it is promoted to `main`. Same code, developer-facing documentation.
+> For the product overview, see [`main`](../../tree/main).
 
 ---
 
-## What this is
-
-Most AI coding tools ship with a personality you cannot see and cannot remove.
-Their system prompt sits above yours, quietly rewriting how the model behaves.
-
-LUBV Studio does the opposite. The **Brain** panel is the entire system prompt,
-it is yours, it is editable, and it persists. The only thing the app appends is
-the tool protocol the agent needs to actually touch your machine. If you want an
-agent that argues, an agent that ships without commentary, or an agent with a
-personality you invented at 3am, you paste it in and it is live on the next
-message.
-
-Everything else is built so that agent can do real work: a full editor, a real
-shell, source control, web access, persistent memory, and a per request cost
-meter so you always know what you are spending.
-
-> The model provider's own policies still apply to API responses. What LUBV
-> removes is *our* layer, not DeepSeek's.
-
-## Highlights
-
-| | |
-|---|---|
-| **Your prompt, unfiltered** | The Brain panel is the whole system prompt. Nothing hidden above it. |
-| **Real agent loop** | Reads, edits, runs, verifies, fixes and repeats until the task is done. |
-| **VS Code style workspace** | File tree, tabbed editor with syntax highlighting, integrated PowerShell, chat. |
-| **Three autonomy levels** | Plan (read only), Approve (diff before every write), Auto (hands off). |
-| **Two working modes** | Code for agentic work, Chat for plain conversation with tools disabled. |
-| **Web access** | Searches the web and reads pages, so it works with current docs and versions. |
-| **Every change revertible** | Each file LUBV touches is checkpointed. One click restores the previous version. |
-| **Live cost meter** | Token and USD accounting per request, per session, per day, all time. |
-| **Persistent memory** | Notes that survive across chats, scoped per project or globally. |
-| **Sandboxed** | Every path resolves inside the project root. Escapes are rejected, not warned about. |
-| **Bilingual** | Turkish and English interface. The agent answers in whichever you pick. |
-
-## Install
-
-### Prebuilt executable
-
-Download `LUBV Studio.exe` from the [Releases](../../releases) page and run it.
-No Python, no dependencies, single file.
-
-### From source
+## Getting set up
 
 ```bash
-git clone https://github.com/alierenlibusiness/LubV-Studio.git
+git clone -b develop https://github.com/alierenlibusiness/LubV-Studio.git
 cd LubV-Studio
+python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 python -m lubv_studio
 ```
 
-On Windows you can also double click `BASLAT.bat`, which installs the
-dependencies on first run and then launches the app.
+Requires Python 3.10+ (3.13 is what it is developed against) and Windows for
+the integrated PowerShell terminal. The rest of the codebase is portable.
 
-### Build your own executable
+Run against an arbitrary folder without touching your saved config:
 
 ```bash
-python build_exe.py     # or double click EXE_YAP.bat
+python -m lubv_studio C:\some\other\project
 ```
 
-Output lands in `dist/LUBV Studio.exe` (~61 MB, self contained).
-
-## First run
-
-1. **Pick a project folder.** The app asks on startup. LUBV is locked to this
-   folder and cannot read or write outside it.
-2. **Add your DeepSeek API key.** Settings panel (gear icon). Get one from
-   [platform.deepseek.com](https://platform.deepseek.com). *Test connection*
-   verifies the key and prints your remaining balance.
-3. **Write the brain.** Open the Brain panel and paste your instructions. Save.
-   That is now the system prompt for every request.
-4. **Talk to it.** Type what you want in the chat on the right.
-
-## The workspace
+## Module map
 
 ```
-┌────┬──────────────┬──────────────────────────┬───────────────┐
-│ 🗂 │              │   tabbed code editor     │  LUBV chat    │
-│ ⑂  │  file tree   │   line numbers, syntax   │  Code / Chat  │
-│ 🧠 │              │   Ctrl+S to save         │  Plan/Approve │
-│ ✦  │              ├──────────────────────────┤  /Auto        │
-│ ↩  │              │   PowerShell terminal    │  messages +   │
-│ ⚙  │              │   live, stateful         │  tool cards   │
-└────┴──────────────┴──────────────────────────┴───────────────┘
-  project · status · cursor · session cost · today cost · model
+lubv_studio/
+├── app.py            entry point: palette, font, icon, language, restart loop
+├── main_window.py    three-column shell, rail, panel stack, status bar, shortcuts
+│
+├── agent.py          the loop: prompt assembly, streaming, tool dispatch, approval
+├── api.py            DeepSeek SSE client, error mapping, model discovery
+├── tools.py          tool protocol, tag parser, sandboxed Workspace
+├── web.py            search (ddgs → Bing RSS → DuckDuckGo HTML) and page extraction
+├── checkpoints.py    pre-write snapshots and revert
+├── memory.py         global and per-project note stores
+├── usage.py          token accounting and USD pricing
+│
+├── chat.py           chat panel, composer, mode selectors, worker lifecycle
+├── editor.py         code editor, gutter, highlighter, tab manager
+├── terminal.py       persistent PowerShell session, git panel
+├── panels.py         side panels: files, memory, brain, undo, settings
+├── widgets.py        bubbles, tool cards, approval dialog, file tree
+│
+├── theme.py          palette, Qt palette override, global stylesheet
+├── icons.py          painter-path icon set
+├── render.py         markdown → Qt rich text, syntax colouring, diffs
+├── config.py         settings dataclass, mode and model catalogues
+└── i18n.py           translation table
 ```
 
-The left rail switches the side panel: **Files**, **Source control**,
-**Memory**, **Brain**, **Undo**, **Settings**. Click the active icon again to
-collapse the panel.
+## How a turn works
 
-## Modes
+```
+user message
+   │
+   ▼
+build_system_prompt()      brain + response language + mode + memory
+   │                       + project tree + tool protocol
+   ▼
+DeepSeekClient.stream()    yields content / reasoning / usage deltas
+   │
+   ├─► StreamTagFilter     hides tool tags from the visible stream
+   │
+   ▼
+parse_tool_calls()         extracts calls in order of appearance
+   │
+   ├─► approval gate       blocks the worker thread until the UI answers
+   │
+   ▼
+tools.execute()            runs inside the sandbox, checkpointing first
+   │
+   ▼
+results appended as a new turn ──► loop, until no tools are called
+```
 
-**Code vs Chat** — Code gives the agent its tools and your project context.
-Chat strips all of it: no file access, no commands, no project tree in the
-prompt, just conversation.
+`AgentWorker` is a `QThread`. It never touches widgets; everything crosses the
+boundary as a signal. Approval is the one place the worker blocks, waiting on a
+`threading.Event` that the UI thread sets from the dialog result.
 
-**Within Code, three autonomy levels:**
+## Adding a tool
 
-- **Plan** — Reads, searches and researches, then hands you a numbered
-  implementation plan. Cannot modify anything. Use it before large refactors.
-- **Approve** *(default)* — Every write, delete and command stops for your
-  confirmation, with a line by line diff of what is about to change.
-- **Auto** — Full autonomy. Writes, runs, reads the error, fixes it, runs again.
-  Every change is still checkpointed and revertible.
+Four edits, no framework:
 
-## What the agent can do
+1. **`tools.py`** — add the tag name to `TAG_NAMES`, map it in `_KIND_BY_TAG`,
+   give it a label in `TOOL_LABELS` and an icon key in `TOOL_ICONS`.
+2. **`tools.py`** — document the tag in `TOOL_PROTOCOL` with a concrete example.
+   The model only knows what this string tells it.
+3. **`tools.py`** — implement it on `Workspace` and dispatch it in `execute()`.
+   Return `(ok: bool, output: str)`.
+4. **`icons.py`** — draw the icon if you used a new key.
 
-| Tool | Behaviour |
+If the tool mutates state, add it to `needs_approval_kind` so it goes through
+the approval gate, and call `_checkpoint()` before writing so it can be undone.
+
+## Conventions
+
+- **Language.** Identifiers, comments and docstrings are Turkish; the public
+  README and commit messages are English. Keep new code consistent with the
+  file it lives in.
+- **Comments explain why.** Not what the next line does. Most of the comments
+  in this codebase exist because a naive implementation was wrong first.
+- **No magic numbers in styles.** Radii and spacing come from `theme.py`.
+  Colours come from the `C` dict, never inline hex, so a palette change is one
+  edit.
+- **User-visible strings go through `t()`.** The Turkish source string is the
+  key. Add the English side to `EN` in `i18n.py`.
+- **Failures return, they do not raise.** Tools hand back `(False, message)`
+  and the message goes to the model, which then has enough context to recover
+  on its own.
+
+## Threading
+
+| Thread | Owns |
 |---|---|
-| Read file | Returns the file with line numbers |
-| Edit file | Surgical replacement of one exact block, cheaper and more precise than rewriting |
-| Write file | Creates a file or replaces it wholesale |
-| List folder | Directory contents |
-| Search project | Full text search across the workspace |
-| Delete file | Removes a file, after approval |
-| Run command | Executes in the project folder via PowerShell (`python`, `git`, `npm`, anything) |
-| Web search | Live search for current docs, error messages, library versions |
-| Fetch page | Opens a URL and extracts the readable text |
-| Write memory | Leaves a durable note for future sessions |
+| Main | Every widget, the config object, all stores |
+| `AgentWorker` | HTTP streaming, tool execution, checkpoint writes |
+| `QProcess` | The PowerShell session, read asynchronously on the main thread |
 
-Every path is resolved against the project root. `..` and absolute paths outside
-the workspace are rejected before the operation runs.
+The worker mutates stores (memory, checkpoints) directly. Those writes are
+append-and-persist, and the UI reloads them on the `memory_changed` /
+`tool_finished` signals rather than sharing live state.
 
-## Cost tracking
+## Theming
 
-Usage comes back with every response and is priced against DeepSeek's published
-rates (USD per 1M tokens):
+`theme.py` exports three things: the `C` colour dict, `palette()` and `qss()`.
 
-| Model | Input (cache hit) | Input (cache miss) | Output |
-|---|---|---|---|
-| `deepseek-v4-flash` | $0.0028 | $0.14 | $0.28 |
-| `deepseek-v4-pro` | $0.003625 | $0.435 | $0.87 |
+The Qt palette override is not optional. Fusion paints scroll area viewports
+and item views from the palette, not the stylesheet, so without it those
+surfaces render white on a dark UI.
 
-The status bar shows session and daily spend at all times. Settings breaks it
-down by session, today, all time and the last few days. A typical request costs
-between **0.02¢ and 0.5¢**.
+Widgets opt into styles by object name (`setObjectName("ToolCard")`) or by
+dynamic property (`setProperty("kind", "primary")`). After changing a dynamic
+property at runtime you must `unpolish`/`polish` the widget for the new rule to
+apply.
 
-## Source control
+## Building
 
-The source control panel wraps the git workflow without leaving the app:
-staged changes, commit, push, pull, log, `git init`, and a one shot
-"connect remote and push" that adds the origin, renames the branch to `main`
-and pushes. Every command is echoed in the integrated terminal so you see
-exactly what ran and what git said back.
+```bash
+python build_exe.py
+```
 
-You can also just tell the agent: *"commit this and push it."*
+Cleans previous output, installs PyInstaller if missing, and produces a one-file
+windowed executable in `dist/`. Unused Qt modules (WebEngine, Quick, Charts,
+3D, Multimedia) are excluded; without those exclusions the binary roughly
+doubles. `--collect-all ddgs` is required or the search backend loses its data
+files at runtime.
 
-## Keyboard
+## Manual test pass
 
-| Key | Action |
+There is no test suite yet. Before promoting to `main`, verify:
+
+- [ ] Sandbox rejects `../x`, `C:\Windows\x` and `..\..\x`
+- [ ] A write, an edit and a delete each appear in Undo and revert cleanly
+- [ ] Approve mode shows a correct diff; Plan mode blocks mutating tools
+- [ ] Auto mode completes a multi-step task without prompting
+- [ ] Stop button cancels mid-stream and leaves no orphan thread
+- [ ] Language switch restarts and the agent replies in the selected language
+- [ ] Cost meter increments and matches the published rate
+- [ ] Terminal keeps its working directory across commands
+- [ ] `git status` / commit / push work from the source control panel
+- [ ] Built executable launches with no Python on PATH
+
+## Branches
+
+| Branch | Purpose |
 |---|---|
-| `Enter` | Send message |
-| `Shift+Enter` | New line |
-| `Ctrl+S` | Save current file |
-| `Ctrl+Shift+S` | Save all |
-| `Ctrl+B` | Toggle side panel |
-| `Ctrl+J` | Toggle terminal |
-| `Ctrl+O` | Open another project |
-| `Ctrl+N` | New chat |
-| `Ctrl+L` | Focus the chat input |
-| `Ctrl+W` | Close tab |
-| `F5` | Refresh file tree |
-| `Esc` | Stop the running turn |
-
-## Where your data lives
-
-Nothing is written into your project except the files you asked the agent to
-change. Application state lives in `~/.lubv_studio/`:
-
-```
-config.json        settings and API key
-memory/            persistent notes, global and per project
-checkpoints/       previous versions of every file the agent touched
-usage.json         token and cost history
-```
-
-## Security notes
-
-- The API key is stored in plain text in `config.json`. Treat that file as a
-  secret and keep it out of version control (it is already gitignored).
-- Auto mode runs shell commands without asking. On an unfamiliar project, start
-  in Plan or Approve.
-- The sandbox constrains file operations to the project root. It does not
-  constrain shell commands, which run with your user's permissions, the same as
-  if you typed them yourself.
-
-## Architecture
-
-See the [`develop`](../../tree/develop) branch for the developer guide: module
-map, the agent loop, how to add a new tool, and the theming system.
+| `main` | Release-ready. Product README. |
+| `develop` | Integration. This guide. |
+| `docs` | Long-form documentation and reference. |
 
 ## License
 
