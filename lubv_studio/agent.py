@@ -19,6 +19,7 @@ from .config import (
     OTO_MODU_TALIMATI, PLAN_MODU_TALIMATI, PROMPT_KURALLARI_TALIMATI,
     SURDURME_TALIMATI,
 )
+from .i18n import t
 from .memory import MemoryStore
 from .tools import ToolCall, Workspace
 from .usage import Kullanim
@@ -106,18 +107,27 @@ class StreamTagFilter:
         return kalan
 
 
-# Bunlar gecicidir: bekleyip tekrar denemek ise yarar. Anahtar hatasi veya
-# bakiye bitmesi gibi kalici hatalarda tekrar denemek sadece zaman kaybi.
+# Yedek metin izleri. Asil karar ApiError.gecici alanindan gelir; bu liste
+# sadece o alani tasimayan (baska bir yerden gelen) hatalar icin kullanilir.
+# Hata mesajlari arayuz diline cevrildigi icin metne bakmak tek basina yeterli
+# degil: her iki dilin izleri de burada.
 _GECICI_IZLER = (
     "429", "500", "502", "503", "504",
-    "baglanti", "bağlantı", "zaman asimi", "timeout", "akis kesildi",
-    "connection", "temporarily", "overload",
+    "baglanti", "bağlantı", "connection",
+    "zaman asimi", "zaman aşımı", "timeout", "timed out",
+    "akis kesildi", "akış kesildi", "stream",
+    "temporarily", "overload", "unavailable",
 )
+_KALICI_IZLER = ("401", "402", "403")
 
 
 def _gecici_hata(exc: Exception) -> bool:
+    """Beklemek fayda eder mi? Once yapisal alan, sonra metin izleri."""
+    gecici = getattr(exc, "gecici", None)
+    if gecici is not None:
+        return bool(gecici)
     metin = str(exc).lower()
-    if "401" in metin or "402" in metin or "403" in metin:
+    if any(iz in metin for iz in _KALICI_IZLER):
         return False
     return any(iz in metin for iz in _GECICI_IZLER)
 
@@ -297,7 +307,7 @@ class AgentWorker(QThread):
         except ApiError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # beklenmedik hata arayuzu cokertmesin
-            self.failed.emit(f"Beklenmeyen hata: {exc}")
+            self.failed.emit(f"{t('Beklenmeyen hata')}: {exc}")
         finally:
             with self._kilit:
                 self._kapandi = True
@@ -347,12 +357,16 @@ class AgentWorker(QThread):
                     self.delta_content.emit(kalan)
                 if ham.strip():
                     # yarim cevap geldi: tekrar denemek metni cogaltir
-                    self.uyari.emit(f"Akis kesildi, kaldigi yerden devam ediliyor. ({exc})")
+                    self.uyari.emit(
+                        f"{t('Akış kesildi, kaldığı yerden devam ediliyor.')} ({exc})"
+                    )
                     return ham, False
                 if not _gecici_hata(exc) or deneme == YENIDEN_DENEME - 1:
                     raise
                 sure = BEKLEME_SANIYE[min(deneme, len(BEKLEME_SANIYE) - 1)]
-                self.uyari.emit(f"Baglanti sorunu, {sure} saniye sonra tekrar deneniyor. ({exc})")
+                self.uyari.emit(
+                    f"{t('Bağlantı sorunu, tekrar deneniyor')} ({sure} sn) ({exc})"
+                )
                 if self.cancel_event.wait(sure):
                     return "", False
                 continue
@@ -364,7 +378,7 @@ class AgentWorker(QThread):
             if not ham.strip() and not self.cancel_event.is_set():
                 # model bos cevap dondu: bir kez daha sor
                 if deneme < YENIDEN_DENEME - 1:
-                    self.uyari.emit("Model bos cevap dondu, tekrar soruluyor.")
+                    self.uyari.emit(t("Model boş cevap döndü, tekrar soruluyor."))
                     continue
             return ham, True
 
@@ -392,8 +406,9 @@ class AgentWorker(QThread):
             tur += 1
             if limit and tur > limit:
                 self.failed.emit(
-                    f"Islem {limit} adimda bitmedi ve durduruldu. Sinirsiz calismasi "
-                    "icin Ayarlar'dan adim limitini 0 yap."
+                    f"{t('İşlem belirlenen adım sayısında bitmedi ve durduruldu')} "
+                    f"({limit}). "
+                    + t("Sınırsız çalışması için Ayarlar'dan adım limitini 0 yap.")
                 )
                 return
 
@@ -427,11 +442,11 @@ class AgentWorker(QThread):
                 if hepsi_basarisiz and imza == onceki_imza:
                     kisir += 1
                     if kisir >= MAX_KISIR_TUR:
-                        self.failed.emit(
-                            "Ayni islem ust uste ayni hatayi verdi ve ilerleme "
-                            "olmadi, dongu durduruldu. Arac kartlarindaki hataya "
-                            "bakip yeni bir yon ver."
-                        )
+                        self.failed.emit(t(
+                            "Aynı işlem üst üste aynı hatayı verdi ve ilerleme "
+                            "olmadı, döngü durduruldu. Araç kartındaki hataya "
+                            "bakıp yeni bir yön ver."
+                        ))
                         return
                 else:
                     kisir = 0

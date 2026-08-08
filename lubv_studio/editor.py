@@ -768,6 +768,7 @@ class WelcomeView(QFrame):
         alt = QLabel(t("DeepSeek ile vibe coding stüdyosu"))
         alt.setStyleSheet(f"color:{C['muted']}; font-size:14px;")
         alt.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        alt.setWordWrap(True)
 
         ipuclari = QLabel(
             t("Soldan bir dosya seç ve aç  ·  Sağdaki sohbete ne istediğini yaz")
@@ -776,6 +777,10 @@ class WelcomeView(QFrame):
         )
         ipuclari.setStyleSheet(f"color:{C['line2']}; font-size:12px;")
         ipuclari.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Sarmayan uzun satirlar orta sutunun en kucuk genisligini belirliyor ve
+        # sol paneli buyutmeyi imkansiz kiliyordu.
+        ipuclari.setWordWrap(True)
+        ipuclari.setMinimumWidth(0)
 
         duzen.addWidget(logo)
         duzen.addWidget(alt)

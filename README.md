@@ -117,6 +117,13 @@ retrying is not always safe:
 - **Partial answer already streamed**: never retry, that would duplicate the
   visible text. Return what arrived and let the loop send a continuation turn.
 
+"Is this worth retrying" is answered by `ApiError.gecici`, set from the HTTP
+status against `GECICI_KODLAR`. It used to be answered by matching words in the
+message, which broke the moment those messages were translated. The flag
+defaults to `None`, not `False`: an unmarked error falls back to the text
+heuristics, so forgetting to mark a new transient error degrades to the old
+behaviour instead of silently disabling retries for it.
+
 ### Messages that arrive mid-run
 
 `mesaj_ekle()` takes a message under a lock and returns `False` once the loop
@@ -216,7 +223,10 @@ would leave the other half unmatchable and hang the "running" state forever.
   Colours come from the `C` dict, never inline hex, so a palette change is one
   edit.
 - **User-visible strings go through `t()`.** The Turkish source string is the
-  key. Add the English side to `EN` in `i18n.py`.
+  key. Add the English side to `EN` in `i18n.py`. This includes strings raised
+  from worker threads and from `api.py`: they land in chat bubbles like any
+  other text. If any logic then branches on those strings, that logic is now
+  broken, so give the object a field to branch on instead.
 - **Failures return, they do not raise.** Tools hand back `(False, message)`
   and the message goes to the model, which then has enough context to recover
   on its own.
@@ -273,6 +283,47 @@ dynamic property (`setProperty("kind", "primary")`). After changing a dynamic
 property at runtime you must `unpolish`/`polish` the widget for the new rule to
 apply.
 
+## Layout traps
+
+A `QSplitter` pane can never be dragged smaller than the sum of its children's
+minimum widths, and a plain `QLabel` reports its full text width as that
+minimum. One long label is therefore enough to freeze an entire column.
+
+That is exactly what happened: the terminal header held the full project path,
+and two welcome-screen labels did not wrap. Between them the centre column
+claimed a 591px minimum, which on a 1234px window left the file panel pinned at
+its own 240px minimum with no slack, so dragging its handle did nothing at all.
+
+The rule for anything placed in a splitter pane: text that can be arbitrarily
+long must either wrap (`setWordWrap(True)`) or elide. Eliding needs three
+things together, and the path label does all three:
+
+```python
+etiket.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+etiket.setMinimumWidth(0)
+# ve resizeEvent icinde QFontMetrics.elidedText ile yeniden yaz
+```
+
+`QSizePolicy.Ignored` alone is not enough, because `minimumSizeHint` still
+comes from the text. `ToolCard.hedef` uses the same pattern for the same
+reason.
+
+Verify a change here by dragging, not by `setSizes()`: `setSizes` silently
+normalises against the same constraints and will happily report a layout the
+user cannot actually reach. `moveSplitter()` is what a drag does.
+
+## Persisted UI state
+
+`window_geometry` and `splitter_state` live in `config.json` as base64 of Qt's
+own `saveGeometry()` / `saveState()` blobs, the two splitter states joined by
+`|`. They are written in `closeEvent` and applied at the top of
+`_pencereyi_yerlestir()`, which returns early when a restore succeeds so the
+proportional first-run layout only runs on a fresh install.
+
+A restored geometry is discarded when it no longer intersects the available
+screen area. Without that check, unplugging a second monitor leaves the app
+opening off-screen with no way to drag it back.
+
 ## Building
 
 ```bash
@@ -314,6 +365,11 @@ verify:
 - [ ] A modified tab shows a dot that does not move the close button
 - [ ] Folder arrows point right when collapsed and down when open
 - [ ] Highlighting distinguishes builtins, literals and declarations
+- [ ] The file panel can be **dragged** wider and narrower, with a long project
+      path open and the welcome screen showing
+- [ ] Window size and both splitter positions survive a restart
+- [ ] A geometry saved on a monitor that is now unplugged falls back to the
+      default layout instead of opening off-screen
 
 **Shell and cost**
 

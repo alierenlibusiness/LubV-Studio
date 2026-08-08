@@ -570,8 +570,11 @@ class FileTree(QTreeWidget):
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, False)  # yuklenmedi
             else:
                 item.setData(0, KLASOR_ROL, False)
-                renk = UZANTI_RENK.get(yol.suffix.lower(), C["line2"])
-                item.setIcon(0, _renkli_nokta(renk))
+                # Klasorde ikon, dosyada nokta olunca satirlar hizasiz
+                # gorunuyordu. Ikisi de ayni izgarada cizilen ikon; dosyanin
+                # turu ikonun renginden okunuyor.
+                renk = UZANTI_RENK.get(yol.suffix.lower(), C["muted"])
+                item.setIcon(0, ikon("dosya", renk, 14))
                 item.setChildIndicatorPolicy(
                     QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
                 )

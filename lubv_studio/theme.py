@@ -185,6 +185,11 @@ QFrame#HeaderBar {{
     background: {C['bg1']};
     border-bottom: 1px solid {C['line']};
 }}
+/* alt terminal: kendi zemini olmadan editorun icine karisiyordu */
+QFrame#TerminalPanel {{
+    background: {C['kod']};
+    border-top: 1px solid {C['line']};
+}}
 QLabel#QueueLabel {{
     color: {C['amber']};
     font-size: 11.5px;
