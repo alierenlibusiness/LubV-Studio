@@ -112,17 +112,17 @@ collapse the panel.
 
 ## Modes
 
-**Code vs Chat** — Code gives the agent its tools and your project context.
+**Code vs Chat.** Code gives the agent its tools and your project context.
 Chat strips all of it: no file access, no commands, no project tree in the
 prompt, just conversation.
 
 **Within Code, three autonomy levels:**
 
-- **Plan** — Reads, searches and researches, then hands you a numbered
+- **Plan:** reads, searches and researches, then hands you a numbered
   implementation plan. Cannot modify anything. Use it before large refactors.
-- **Approve** *(default)* — Every write, delete and command stops for your
+- **Approve** *(default)*: every write, delete and command stops for your
   confirmation, with a line by line diff of what is about to change.
-- **Auto** — Full autonomy. Writes, runs, reads the error, fixes it, runs again.
+- **Auto:** full autonomy. Writes, runs, reads the error, fixes it, runs again.
   Every change is still checkpointed and revertible.
 
 ## What the agent can do
@@ -160,12 +160,32 @@ between **0.02¢ and 0.5¢**.
 ## Source control
 
 The source control panel wraps the git workflow without leaving the app:
-staged changes, commit, push, pull, log, `git init`, and a one shot
-"connect remote and push" that adds the origin, renames the branch to `main`
-and pushes. Every command is echoed in the integrated terminal so you see
-exactly what ran and what git said back.
+changed files, commit, push, pull, log and `git init`.
 
-You can also just tell the agent: *"commit this and push it."*
+**Publishing to GitHub takes one click.** If the [GitHub CLI](https://cli.github.com)
+is installed and signed in, the panel shows your account and *Create repo on
+GitHub* does the whole thing: initialises the repository if needed, makes the
+first commit, creates the remote repository (public or private, your choice)
+and pushes. If the CLI is missing, it opens the new-repository page and you
+paste the address back into the box.
+
+For a repository that already exists, *Connect and push* accepts any of these
+forms and normalises them:
+
+```
+user/repo
+github.com/user/repo
+https://github.com/user/repo
+git@github.com:user/repo.git
+```
+
+If git has never been configured on the machine, the panel asks for a name and
+email once and stores them, instead of failing with git's *"Author identity
+unknown"*.
+
+Every command runs in the integrated terminal, so you see exactly what ran and
+what git said back. You can also just tell the agent: *"commit this and push
+it."* Commands the agent runs are echoed into the same terminal.
 
 ## Keyboard
 

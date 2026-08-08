@@ -231,6 +231,40 @@ EN: dict[str, str] = {
     "Bu klasörde depo yok. Aşağıdan 'Depo kur' de.":
         "No repository here. Use 'Init repo' below.",
     "Değişiklik yok, her şey temiz": "No changes, everything is clean",
+    "Bu klasörde git deposu yok.": "No git repository in this folder.",
+    "Bağla ve gönder": "Connect and push",
+    "Var olan bir depoya bağlanır ve projeyi gönderir":
+        "Connects to an existing repository and pushes the project",
+    "GitHub'da repo aç": "Create repo on GitHub",
+    "Yeni bir depo oluşturur ve projeyi gönderir":
+        "Creates a new repository and pushes the project",
+    "GitHub hesabı: ": "GitHub account: ",
+    "GitHub CLI kurulu değil, repo adresini elle yapıştır":
+        "GitHub CLI is not installed, paste the repository URL yourself",
+    "GitHub CLI kurulu ama giriş yapılmamış":
+        "GitHub CLI is installed but not signed in",
+    "GitHub CLI kurulu ama giriş yapılmamış. Giriş başlatılsın mı?":
+        "GitHub CLI is installed but not signed in. Start the sign-in flow?",
+    "Geçerli bir depo adresi yaz. Örnek: kullanici/repo":
+        "Enter a valid repository address. Example: user/repo",
+    "Uygulama içinden repo açmak için GitHub CLI gerekiyor "
+    "(cli.github.com). Şimdi tarayıcıda yeni repo sayfasını "
+    "açayım mı? Sonra adresi yukarıdaki kutuya yapıştır.":
+        "Creating a repository from inside the app needs the GitHub CLI "
+        "(cli.github.com). Open the new-repository page in your browser "
+        "instead? Then paste the address into the box above.",
+    "Depo adı:": "Repository name:",
+    "Depo herkese açık (public) olsun mu? Hayır dersen özel (private) olur.":
+        "Should the repository be public? Choosing No makes it private.",
+    "Git kimliği": "Git identity",
+    "Commit'lerde görünecek isim:": "Name shown on commits:",
+    "Commit'lerde görünecek e-posta:": "Email shown on commits:",
+    "Kimlik kaydedilemedi, terminalden dene.":
+        "Could not save the identity, try from the terminal.",
+    "PowerShell oturumu açıldı": "PowerShell session started",
+    "PowerShell başlatılamadı.": "PowerShell could not start.",
+    "Terminal hazır değil. Önce proje klasörü seç.":
+        "Terminal is not ready. Choose a project folder first.",
     "depo yok": "no repo",
     "uzak depo yok": "no remote",
     "dal: ": "branch: ",

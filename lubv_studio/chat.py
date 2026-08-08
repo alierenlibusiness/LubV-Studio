@@ -213,6 +213,7 @@ class ChatPanel(QFrame):
     kullanim_degisti = Signal()
     calisma_durumu = Signal(bool)
     kip_degisti = Signal(str)
+    komut_calisti = Signal(str, str, bool)   # ajan terminal komutu calistirdi
 
     def __init__(self, cfg, memory, checkpoints, usage_store, parent=None) -> None:
         super().__init__(parent)
@@ -642,6 +643,8 @@ class ChatPanel(QFrame):
             self._ekle(kart)
         kart.tamamla(call)
 
+        if call.kind == "run":
+            self.komut_calisti.emit(call.target, call.output or "", bool(call.ok))
         if call.touches_file and call.ok:
             self.dosya_degisti.emit(call.target)
             self.proje_degisti.emit()

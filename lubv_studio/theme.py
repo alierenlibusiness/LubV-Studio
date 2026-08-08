@@ -163,7 +163,6 @@ QFrame#Card {{
     border: 1px solid {C['line']};
     border-radius: {R_BUYUK}px;
 }}
-QFrame#Divider {{ background: {C['line']}; max-height: 1px; min-height: 1px; border: none; }}
 
 /* ============ ust seritler ============ */
 QFrame#TopBar {{
@@ -225,6 +224,14 @@ QPushButton[kind="ghost"]:hover {{
 QPushButton[kind="danger"] {{ color: {C['red']}; border-color: {C['line2']}; }}
 QPushButton[kind="danger"]:hover {{
     background: {C['red_dim']}; border-color: {C['red']}; color: #FFB3AE;
+}}
+
+/* dar seritlere sigan kucuk dugme: normal dolgu 32px'e ulasip seridi tasiriyor */
+QPushButton[size="compact"] {{
+    padding: 2px 9px;
+    min-height: 14px;
+    max-height: 22px;
+    font-size: 11.5px;
 }}
 
 QToolButton#IconButton {{
