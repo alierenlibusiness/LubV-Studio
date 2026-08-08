@@ -22,6 +22,29 @@ class Delta:
     usage: dict | None = None
 
 
+@dataclass
+class Bakiye:
+    """Hesabin anlik durumu. Ust seritteki rozet bunu gosterir."""
+    tutar: float = 0.0
+    birim: str = "USD"
+    gecerli: bool = False        # veri gercekten alinabildi mi
+    mesaj: str = ""              # alinamadiysa sebep
+    zaman: float = 0.0
+
+    @property
+    def metin(self) -> str:
+        if not self.gecerli:
+            return "--"
+        simge = {"USD": "$", "CNY": "¥", "TRY": "₺"}.get(self.birim.upper(), "")
+        if simge:
+            return f"{simge}{self.tutar:,.2f}"
+        return f"{self.tutar:,.2f} {self.birim}"
+
+    @property
+    def dusuk_mu(self) -> bool:
+        return self.gecerli and self.tutar < 1.0
+
+
 HATA_MESAJLARI = {
     400: "Istek gecersiz (400). Model adi veya parametreler hatali olabilir.",
     401: "API anahtari gecersiz (401). Ayarlar'dan anahtari kontrol et.",
@@ -74,27 +97,46 @@ class DeepSeekClient:
 
     # ---------- baglanti testi ----------
 
+    def bakiye(self, zaman_asimi: int = 15) -> Bakiye:
+        """Kalan bakiyeyi yapisal olarak verir. Hicbir zaman istisna atmaz."""
+        import time as _time
+
+        if not self.api_key:
+            return Bakiye(mesaj="API anahtari girilmemis.", zaman=_time.time())
+        try:
+            resp = self._session.get(
+                f"{self.base_url}/user/balance",
+                headers=self._headers,
+                timeout=zaman_asimi,
+            )
+        except requests.RequestException as exc:
+            return Bakiye(mesaj=f"Baglanti kurulamadi: {exc}", zaman=_time.time())
+
+        if resp.status_code != 200:
+            return Bakiye(mesaj=str(self._hata(resp)), zaman=_time.time())
+
+        try:
+            veri = resp.json()
+            bilgiler = veri.get("balance_infos") or []
+            if not bilgiler:
+                return Bakiye(mesaj="Bakiye bilgisi bos dondu.", zaman=_time.time())
+            bilgi = bilgiler[0]
+            return Bakiye(
+                tutar=float(bilgi.get("total_balance") or 0.0),
+                birim=str(bilgi.get("currency") or "USD"),
+                gecerli=True,
+                zaman=_time.time(),
+            )
+        except Exception as exc:
+            return Bakiye(mesaj=f"Bakiye okunamadi: {exc}", zaman=_time.time())
+
     def test(self) -> str:
         if not self.api_key:
             raise ApiError("API anahtari bos.")
-        try:
-            resp = self._session.get(
-                f"{self.base_url}/user/balance", headers=self._headers, timeout=20
-            )
-        except requests.RequestException as exc:
-            raise ApiError(f"Baglanti kurulamadi: {exc}") from None
-        if resp.status_code == 200:
-            try:
-                veri = resp.json()
-                bilgi = (veri.get("balance_infos") or [{}])[0]
-                tutar = bilgi.get("total_balance")
-                birim = bilgi.get("currency", "")
-                if tutar is not None:
-                    return f"Baglanti basarili. Kalan bakiye: {tutar} {birim}"
-            except Exception:
-                pass
-            return "Baglanti basarili."
-        raise self._hata(resp)
+        durum = self.bakiye()
+        if durum.gecerli:
+            return f"Baglanti basarili. Kalan bakiye: {durum.metin}"
+        raise ApiError(durum.mesaj or "Baglanti kurulamadi.")
 
     # ---------- streaming sohbet ----------
 

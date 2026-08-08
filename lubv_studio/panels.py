@@ -6,17 +6,21 @@ altta govde. Boylece panel degistirdiginde hicbir sey yerinden oynamaz.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
-    QSlider, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton,
+    QScrollArea, QSlider, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from . import usage as usage_mod
-from .config import DEFAULT_SYSTEM_PROMPT, MODEL_NOTLARI, MODELS
+from .config import (
+    DEFAULT_PROMPT_RULES, DEFAULT_SYSTEM_PROMPT, MODEL_NOTLARI, MODELS,
+)
 from .memory import GLOBAL, PROJECT
 from .i18n import DILLER, t
 from .theme import C
@@ -141,6 +145,157 @@ class ExplorerPanel(PanelBase):
         yol = self.agac.secili_yol()
         if yol and Path(yol).is_file():
             self.baglama_ekle.emit(yol)
+
+
+# --------------------------------------------------------------------------
+# Oturumlar
+# --------------------------------------------------------------------------
+
+class SessionPanel(PanelBase):
+    """Gecmis sohbetler: ac, yeniden adlandir, sil.
+
+    Her oturum diske yazildigi icin uygulama kapansa da sohbetler durur.
+    Listede en son calisilan en ustte olur.
+    """
+
+    oturum_secildi = Signal(str)
+    yeni_istendi = Signal()
+    bildirim = Signal(str)
+
+    def __init__(self, store, parent=None) -> None:
+        super().__init__(t("Oturumlar"), parent)
+        self.store = store
+        self.aktif_id = ""
+
+        self.serit_dugmesi("arti", t("Yeni sohbet başlat"), self.yeni_istendi.emit)
+        self.serit_dugmesi("yenile", t("Listeyi yenile"), self.tazele)
+
+        self.arama = QLineEdit()
+        self.arama.setPlaceholderText(t("oturum ara"))
+        self.arama.setClearButtonEnabled(True)
+        self.arama.textChanged.connect(self._filtrele)
+
+        self.liste = QListWidget()
+        self.liste.setWordWrap(True)
+        self.liste.itemDoubleClicked.connect(self._ac)
+
+        dugmeler = QHBoxLayout()
+        dugmeler.setSpacing(5)
+        ac = QPushButton(t("Aç"))
+        ac.setProperty("kind", "primary")
+        ac.clicked.connect(lambda: self._ac(self.liste.currentItem()))
+        adlandir = QPushButton(t("Adını değiştir"))
+        adlandir.setProperty("kind", "ghost")
+        adlandir.clicked.connect(self._adlandir)
+        dugmeler.addWidget(ac, 1)
+        dugmeler.addWidget(adlandir, 1)
+
+        silmeler = QHBoxLayout()
+        silmeler.setSpacing(5)
+        sil = QPushButton(t("Seçiliyi sil"))
+        sil.setProperty("kind", "danger")
+        sil.clicked.connect(self._sil)
+        hepsi = QPushButton(t("Tümünü sil"))
+        hepsi.setProperty("kind", "ghost")
+        hepsi.clicked.connect(self._hepsini_sil)
+        silmeler.addWidget(sil, 1)
+        silmeler.addWidget(hepsi, 1)
+
+        self.duzen.addWidget(self.arama)
+        self.duzen.addWidget(self.liste, 1)
+        self.duzen.addLayout(dugmeler)
+        self.duzen.addLayout(silmeler)
+        self.tazele()
+
+    # ---------- liste ----------
+
+    def tazele(self, aktif_id: str = "") -> None:
+        if aktif_id:
+            self.aktif_id = aktif_id
+        secili = self._secili_kimlik()
+        self.liste.clear()
+        kayitlar = self.store.ozetler()
+        if not kayitlar:
+            bos = QListWidgetItem(t("Henüz kayıtlı oturum yok."))
+            bos.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.liste.addItem(bos)
+            self.baslik.setText(t("Oturumlar").upper())
+            return
+
+        for oturum in kayitlar:
+            proje = Path(oturum.proje).name if oturum.proje else t("proje yok")
+            isaret = "● " if oturum.id == self.aktif_id else ""
+            alt = (
+                f"{oturum.zaman_etiketi()}  ·  {proje}  ·  "
+                f"{oturum.mesaj_sayisi}{t(' mesaj')}"
+            )
+            item = QListWidgetItem(f"{isaret}{oturum.gorunen_baslik}\n{alt}")
+            item.setData(Qt.ItemDataRole.UserRole, oturum.id)
+            item.setToolTip(f"{oturum.gorunen_baslik}\n{oturum.proje}")
+            if oturum.id == self.aktif_id:
+                item.setForeground(QColor(C["accent_hi"]))
+            self.liste.addItem(item)
+            if oturum.id == secili:
+                self.liste.setCurrentItem(item)
+
+        self.baslik.setText(f"{t('Oturumlar').upper()}  ({len(kayitlar)})")
+        self._filtrele(self.arama.text())
+
+    def _filtrele(self, metin: str) -> None:
+        arama = (metin or "").lower().strip()
+        for i in range(self.liste.count()):
+            item = self.liste.item(i)
+            item.setHidden(bool(arama) and arama not in item.text().lower())
+
+    def _secili_kimlik(self) -> str:
+        item = self.liste.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else ""
+
+    # ---------- eylemler ----------
+
+    def _ac(self, item) -> None:
+        kimlik = item.data(Qt.ItemDataRole.UserRole) if item else ""
+        if kimlik:
+            self.oturum_secildi.emit(kimlik)
+
+    def _adlandir(self) -> None:
+        kimlik = self._secili_kimlik()
+        if not kimlik:
+            return
+        kayit = self.store.yukle(kimlik)
+        if kayit is None:
+            return
+        yeni, tamam = QInputDialog.getText(
+            self, t("Oturumu yeniden adlandır"), t("Yeni ad:"), text=kayit.baslik
+        )
+        if tamam and yeni.strip():
+            self.store.yeniden_adlandir(kimlik, yeni.strip())
+            self.tazele()
+            self.bildirim.emit(t("Oturum adı değiştirildi."))
+
+    def _sil(self) -> None:
+        kimlik = self._secili_kimlik()
+        if not kimlik:
+            return
+        onay = QMessageBox.question(
+            self, t("Oturumlar"), t("Bu oturum kalıcı olarak silinsin mi?")
+        )
+        if onay != QMessageBox.StandardButton.Yes:
+            return
+        if self.store.sil(kimlik):
+            self.tazele()
+            self.bildirim.emit(t("Oturum silindi."))
+
+    def _hepsini_sil(self) -> None:
+        onay = QMessageBox.question(
+            self, t("Oturumlar"),
+            t("Kayıtlı bütün oturumlar silinsin mi? Bu geri alınamaz."),
+        )
+        if onay != QMessageBox.StandardButton.Yes:
+            return
+        adet = self.store.hepsini_sil()
+        self.tazele()
+        self.bildirim.emit(f"{adet}{t(' oturum silindi.')}")
 
 
 # --------------------------------------------------------------------------
@@ -457,9 +612,47 @@ class SettingsPanel(QFrame):
             t("Maks. yanıt token"), 1024, 131072, cfg.max_tokens, 1024, "max_tokens"
         ))
         d.addLayout(self._sayi_satiri(
-            t("Maks. ajan adımı"), 1, 40, cfg.max_iterations, 1, "max_iterations"
+            t("Maks. ajan adımı"), 0, 999, cfg.max_iterations, 1, "max_iterations",
+            ozel_metin=t("sınırsız"),
         ))
-        d.addWidget(_ipucu(t("Bir istek için LUBV'nin arka arkaya kaç adım atabileceği.")))
+        d.addWidget(_ipucu(t(
+            "Bir istek için LUBV'nin arka arkaya kaç adım atabileceği. "
+            "0 yazarsan sınır yoktur: işi bitirene kadar durmaz, sadece "
+            "Durdur tuşu keser."
+        )))
+
+        # ---- Prompt kurallari ----
+        d.addSpacing(4)
+        d.addWidget(_bolum(t("Prompt kuralları")))
+        d.addWidget(_ipucu(t(
+            "İstek yazarken uyulmasını istediğin kurallar. LUBV bunları bilir; "
+            "isteğin eksik kaldığında hangi maddenin eksik olduğunu söyler ve "
+            "aynı isteğin düzgün halini örnek olarak yazar."
+        )))
+
+        self.kural_kullan = QCheckBox(t("Prompt kurallarını LUBV'ye öğret"))
+        self.kural_kullan.setChecked(cfg.use_prompt_rules)
+        self.kural_kullan.toggled.connect(self._kural_kullanimi)
+        d.addWidget(self.kural_kullan)
+
+        self.kurallar = QPlainTextEdit()
+        self.kurallar.setObjectName("PromptEdit")
+        self.kurallar.setPlainText(cfg.etkin_prompt_kurallari)
+        self.kurallar.setMinimumHeight(150)
+        self.kurallar.setEnabled(cfg.use_prompt_rules)
+        d.addWidget(self.kurallar)
+
+        kural_dugmeler = QHBoxLayout()
+        kural_dugmeler.setSpacing(5)
+        kural_kaydet = QPushButton(t("Kuralları kaydet"))
+        kural_kaydet.setProperty("kind", "primary")
+        kural_kaydet.clicked.connect(self._kurallari_kaydet)
+        kural_sifirla = QPushButton(t("Sıfırla"))
+        kural_sifirla.setProperty("kind", "ghost")
+        kural_sifirla.clicked.connect(self._kurallari_sifirla)
+        kural_dugmeler.addWidget(kural_kaydet, 2)
+        kural_dugmeler.addWidget(kural_sifirla, 1)
+        d.addLayout(kural_dugmeler)
 
         # ---- İzinler ----
         d.addSpacing(4)
@@ -486,6 +679,25 @@ class SettingsPanel(QFrame):
         # ---- Harcama ----
         d.addSpacing(4)
         d.addWidget(_bolum(t("Harcama")))
+
+        self.bakiye_kutu = QLabel(t("Bakiye sorgulanıyor") + "...")
+        self.bakiye_kutu.setWordWrap(True)
+        self.bakiye_kutu.setTextFormat(Qt.TextFormat.RichText)
+        self.bakiye_kutu.setStyleSheet(
+            f"background:{C['bg2']}; border:1px solid {C['line']}; "
+            "border-radius:10px; padding:10px;"
+        )
+        d.addWidget(self.bakiye_kutu)
+
+        self.bakiye_goster = QCheckBox(t("Bakiyeyi üst şeritte göster"))
+        self.bakiye_goster.setChecked(cfg.show_balance)
+        self.bakiye_goster.toggled.connect(lambda v: self._ayarla("show_balance", v))
+        d.addWidget(self.bakiye_goster)
+
+        d.addLayout(self._sayi_satiri(
+            t("Bakiye yenileme (sn)"), 10, 600, cfg.balance_refresh, 5, "balance_refresh"
+        ))
+
         self.maliyet_kutu = QLabel()
         self.maliyet_kutu.setWordWrap(True)
         self.maliyet_kutu.setTextFormat(Qt.TextFormat.RichText)
@@ -508,19 +720,75 @@ class SettingsPanel(QFrame):
 
     # ---------- yardimcilar ----------
 
-    def _sayi_satiri(self, etiket, alt, ust, deger, adim, alan) -> QHBoxLayout:
+    def _sayi_satiri(
+        self, etiket, alt, ust, deger, adim, alan, ozel_metin: str = ""
+    ) -> QHBoxLayout:
         satir = QHBoxLayout()
         yazi = QLabel(etiket)
         yazi.setStyleSheet(f"color:{C['text2']}; font-size:12.5px;")
         kutu = QSpinBox()
         kutu.setRange(alt, ust)
         kutu.setSingleStep(adim)
+        if ozel_metin:
+            # en dusuk deger icin sayi yerine kelime gorunur: "0" yerine "sinirsiz"
+            kutu.setSpecialValueText(ozel_metin)
+            kutu.setFixedWidth(104)
+        else:
+            kutu.setFixedWidth(88)
         kutu.setValue(deger)
-        kutu.setFixedWidth(88)
         kutu.valueChanged.connect(lambda v, a=alan: self._ayarla(a, v))
         satir.addWidget(yazi, 1)
         satir.addWidget(kutu)
         return satir
+
+    # ---------- prompt kurallari ----------
+
+    def _kural_kullanimi(self, acik: bool) -> None:
+        self.kurallar.setEnabled(acik)
+        self._ayarla("use_prompt_rules", acik)
+
+    def _kurallari_kaydet(self) -> None:
+        metin = self.kurallar.toPlainText().strip()
+        varsayilan = DEFAULT_PROMPT_RULES.get(
+            self.cfg.language, DEFAULT_PROMPT_RULES["tr"]
+        )
+        # varsayilanla ayniysa bos birak, dil degisince yeni dilin seti gelsin
+        self.cfg.prompt_rules = "" if metin == varsayilan.strip() else metin
+        self.cfg.save()
+        self.degisti.emit()
+        self.bildirim.emit(t("Prompt kuralları kaydedildi."))
+
+    def _kurallari_sifirla(self) -> None:
+        self.cfg.prompt_rules = ""
+        self.cfg.save()
+        self.kurallar.setPlainText(self.cfg.etkin_prompt_kurallari)
+        self.degisti.emit()
+        self.bildirim.emit(t("Prompt kuralları varsayılana döndü."))
+
+    # ---------- bakiye ----------
+
+    def bakiyeyi_yaz(self, bakiye) -> None:
+        """Ust seritteki izleyici her yenilediginde burasi da guncellenir."""
+        if bakiye is None:
+            return
+        if not bakiye.gecerli:
+            self.bakiye_kutu.setText(
+                f"<div style='color:{C['muted']}; font-size:11px;'>"
+                + t("KALAN BAKİYE") + "</div>"
+                f"<div style='color:{C['muted']}; font-size:12px;'>"
+                f"{bakiye.mesaj or t('Bakiye alınamadı')}</div>"
+            )
+            return
+        renk = C["amber"] if bakiye.dusuk_mu else C["accent_hi"]
+        an = time.strftime("%H:%M:%S", time.localtime(bakiye.zaman))
+        self.bakiye_kutu.setText(
+            f"<div style='color:{C['muted']}; font-size:11px;'>"
+            + t("KALAN BAKİYE") + "</div>"
+            f"<div style='color:{renk}; font-size:20px; font-weight:700;'>"
+            f"{bakiye.metin}</div>"
+            f"<div style='color:{C['muted']}; font-size:11px;'>"
+            + t("son güncelleme") + f": {an}</div>"
+        )
 
     def _dil_degisti(self) -> None:
         kod = self.dil_kutu.currentData()
@@ -533,7 +801,7 @@ class SettingsPanel(QFrame):
         self.anahtar.setEchoMode(
             QLineEdit.EchoMode.Normal if acik else QLineEdit.EchoMode.Password
         )
-        self.goster.setText("Gizle" if acik else t("Göster"))
+        self.goster.setText(t("Gizle") if acik else t("Göster"))
 
     def _modelleri_doldur(self, adlar: list[str]) -> None:
         self.model_kutu.blockSignals(True)

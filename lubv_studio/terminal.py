@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
+import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, Qt, QUrl, Signal
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -30,7 +32,15 @@ def _mono(size: int = 12) -> QFont:
 
 
 class Terminal(QFrame):
-    """Proje klasorunde acilan, durumunu koruyan kabuk oturumu."""
+    """Proje klasorunde acilan, durumunu koruyan kabuk oturumu.
+
+    Kabuk stdin'den beslendigi icin normalde "komut bitti mi, cikis kodu ne,
+    hangi klasordeyiz" bilinemez. Her komuttan sonra gizli bir bitis satiri
+    gonderilir; ciktida o satir gorununce durum serit guncellenir ve satir
+    ekrandan ayiklanir. Kullanici sadece kendi komutunun ciktisini gorur.
+    """
+
+    calisma_degisti = Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -39,6 +49,13 @@ class Terminal(QFrame):
         self.proc: QProcess | None = None
         self.gecmis: list[str] = []
         self.gecmis_index = -1
+        self.calisiyor = False
+        self._tampon = ""
+        self._isaret = f"__LUBV_{uuid.uuid4().hex[:10]}__"
+        self._isaret_re = re.compile(
+            re.escape(self._isaret) + r" (-?\d+) ?(.*)"
+        )
+        self._baslangic = time.monotonic()
 
         duzen = QVBoxLayout(self)
         duzen.setContentsMargins(0, 0, 0, 0)
@@ -62,11 +79,22 @@ class Terminal(QFrame):
         self.yol_etiketi = QLabel("")
         self.yol_etiketi.setObjectName("TopPath")
 
+        self.durum_rozet = QLabel("")
+        self.durum_rozet.setObjectName("Badge")
+        self.durum_rozet.setVisible(False)
+
         temizle = QPushButton(t("Temizle"))
         temizle.setProperty("kind", "ghost")
         temizle.setProperty("size", "compact")
         temizle.setToolTip(t("Ekrandaki çıktıyı siler"))
         temizle.clicked.connect(self.temizle)
+
+        self.kes_dugme = QPushButton(t("Durdur"))
+        self.kes_dugme.setProperty("kind", "danger")
+        self.kes_dugme.setProperty("size", "compact")
+        self.kes_dugme.setToolTip(t("Çalışan komutu keser"))
+        self.kes_dugme.clicked.connect(self.komutu_kes)
+        self.kes_dugme.setVisible(False)
 
         durdur = QPushButton(t("Yeniden başlat"))
         durdur.setProperty("kind", "ghost")
@@ -77,6 +105,8 @@ class Terminal(QFrame):
         s_duzen.addWidget(simge)
         s_duzen.addWidget(self.baslik)
         s_duzen.addWidget(self.yol_etiketi, 1)
+        s_duzen.addWidget(self.durum_rozet)
+        s_duzen.addWidget(self.kes_dugme)
         s_duzen.addWidget(temizle)
         s_duzen.addWidget(durdur)
 
@@ -112,59 +142,118 @@ class Terminal(QFrame):
     # ---------- kabuk yonetimi ----------
 
     def set_cwd(self, yol: str) -> None:
-        self.cwd = yol or ""
+        yeni = yol or ""
+        if yeni == self.cwd and self.hazir_mi():
+            return   # ayni klasor icin kabugu bosuna yeniden baslatma
+        self.cwd = yeni
         self.yol_etiketi.setText(self.cwd)
         self.yeniden_baslat()
 
+    def hazir_mi(self) -> bool:
+        return (
+            self.proc is not None
+            and self.proc.state() == QProcess.ProcessState.Running
+        )
+
     def yeniden_baslat(self) -> None:
-        self._kabugu_kapat()
+        self.kabugu_kapat()
+        self._durum_ayarla(False)
+        self._tampon = ""
         if not self.cwd or not Path(self.cwd).is_dir():
+            self.yol_etiketi.setText(t("proje seçilmedi"))
             return
+
         self.proc = QProcess(self)
         self.proc.setWorkingDirectory(self.cwd)
         self.proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self.proc.readyReadStandardOutput.connect(self._oku)
-        program, argumanlar, _ = platform_.kabuk()
-        self.proc.start(program, argumanlar)
-        if self.proc.waitForStarted(4000):
-            self._yaz(
-                f"{platform_.kabuk_adi()} {t('oturumu açıldı')}  ·  {self.cwd}\n",
-                C["muted"],
-            )
-            if platform_.WINDOWS:
-                # PowerShell'in ilerleme cubuklari ciktiyi kirletiyor
-                self.calistir("$ProgressPreference='SilentlyContinue'", sessiz=True)
-        else:
-            self._yaz(t("Kabuk başlatılamadı.") + "\n", C["red"])
+        self.proc.finished.connect(self._kabuk_bitti)
+        self.proc.errorOccurred.connect(self._kabuk_hatasi)
 
-    def _kabugu_kapat(self) -> None:
-        if self.proc is not None:
-            try:
-                self.proc.kill()
-                self.proc.waitForFinished(1500)
-            except Exception:
-                pass
+        ortam = QProcessEnvironment.systemEnvironment()
+        ortam.insert("PYTHONIOENCODING", "utf-8")
+        ortam.insert("PYTHONUNBUFFERED", "1")
+        ortam.insert("GIT_PAGER", "cat")
+        ortam.insert("PAGER", "cat")
+        ortam.insert("TERM", "dumb")
+        self.proc.setProcessEnvironment(ortam)
+
+        program, argumanlar, ad = platform_.kabuk()
+        self.proc.start(program, argumanlar)
+        if not self.proc.waitForStarted(6000):
+            self._yaz(t("Kabuk başlatılamadı.") + f" ({program})\n", C["red"])
             self.proc = None
+            return
+
+        self._yaz(f"{ad} {t('oturumu açıldı')}  ·  {self.cwd}\n", C["muted"])
+        # ciktiyi bozan varsayilanlar (ilerleme cubugu, renk kacislari, kod
+        # sayfasi) daha ilk komuttan once kapatilir
+        for hazirlik in platform_.kabuk_hazirlik_komutlari():
+            self._ham_yaz(hazirlik)
+
+    def kabugu_kapat(self) -> None:
+        if self.proc is None:
+            return
+        try:
+            self.proc.readyReadStandardOutput.disconnect()
+            self.proc.finished.disconnect()
+            self.proc.errorOccurred.disconnect()
+        except Exception:
+            pass
+        try:
+            self.proc.kill()
+            self.proc.waitForFinished(1500)
+        except Exception:
+            pass
+        self.proc = None
+
+    def _kabuk_bitti(self, kod: int, _durum) -> None:
+        self._durum_ayarla(False)
+        self._yaz(f"\n{t('Kabuk kapandı')} ({kod}). {t('Yeniden başlat.')}\n", C["muted"])
+
+    def _kabuk_hatasi(self, _hata) -> None:
+        self._durum_ayarla(False)
 
     def closeEvent(self, event):  # noqa: N802
-        self._kabugu_kapat()
+        self.kabugu_kapat()
         super().closeEvent(event)
 
     # ---------- calistirma ----------
 
+    def _ham_yaz(self, satir: str) -> None:
+        """Kabuga ekranda gorunmeden bir satir gonderir."""
+        if self.hazir_mi():
+            self.proc.write((satir + "\n").encode("utf-8"))
+
     def calistir(self, komut: str, sessiz: bool = False) -> None:
         if not komut.strip():
             return
-        if self.proc is None or self.proc.state() != QProcess.ProcessState.Running:
+        if not self.hazir_mi():
             self.yeniden_baslat()
-        if self.proc is None:
+        if not self.hazir_mi():
             self._yaz(t("Terminal hazır değil. Önce proje klasörü seç.") + "\n", C["red"])
             return
+
         if not sessiz:
             self._yaz(f"\n❯ {komut}\n", C["accent_hi"])
-            self.gecmis.append(komut)
+            if not self.gecmis or self.gecmis[-1] != komut:
+                self.gecmis.append(komut)
             self.gecmis_index = len(self.gecmis)
+            self._durum_ayarla(True)
+            self._baslangic = time.monotonic()
+
         self.proc.write((komut + "\n").encode("utf-8"))
+        if not sessiz:
+            # bitis isareti: cikis kodu ve guncel klasor buradan ogrenilir
+            self._ham_yaz(platform_.bitis_isareti_komutu(self._isaret))
+
+    def komutu_kes(self) -> None:
+        """Calisan komutu keser. Kabuk stdin ile beslendigi icin tek guvenilir
+        yol sureci kapatip yeniden acmaktir; klasor korunur."""
+        if not self.calisiyor:
+            return
+        self._yaz("\n" + t("komut kesildi") + "\n", C["red"])
+        self.yeniden_baslat()   # self.cwd korunur, kabuk ayni klasorde acilir
 
     def _gonder(self) -> None:
         komut = self.giris.text()
@@ -174,14 +263,72 @@ class Terminal(QFrame):
             return
         self.calistir(komut)
 
+    def _durum_ayarla(self, calisiyor: bool) -> None:
+        self.calisiyor = calisiyor
+        self.kes_dugme.setVisible(calisiyor)
+        self.durum_rozet.setVisible(calisiyor)
+        if calisiyor:
+            self.durum_rozet.setText(t("çalışıyor"))
+            self.durum_rozet.setProperty("tone", "amber")
+        self.durum_rozet.style().unpolish(self.durum_rozet)
+        self.durum_rozet.style().polish(self.durum_rozet)
+        self.calisma_degisti.emit(calisiyor)
+
     def _oku(self) -> None:
         if self.proc is None:
             return
         ham = bytes(self.proc.readAllStandardOutput())
-        metin = ham.decode("utf-8", errors="replace")
-        metin = _ANSI_RE.sub("", metin)
-        if metin.strip():
-            self._yaz(metin, C["text2"])
+        if not ham:
+            return
+        self._tampon += ham.decode("utf-8", errors="replace")
+
+        # bitis isareti tam satir olarak gelmis olabilir; satir satir isle
+        while "\n" in self._tampon:
+            satir, self._tampon = self._tampon.split("\n", 1)
+            self._satir_isle(satir)
+
+        # Satir sonu gelmemis kalan parca (ornegin ilerleme yazisi) beklerken
+        # ekranda gorunmezse kullanici uygulama dondu saniyor. Ancak isaretin
+        # yarisi gelmis olabilir; onu basip tamponu bosaltmak isaretin geri
+        # kalanini eslesmez hale getirir ve "calisiyor" rozeti sonsuza kadar
+        # asili kalirdi. Isaretin baslangici olabilecek parca bekletilir.
+        if self._tampon and not self._isaret_baslangici_olabilir(self._tampon):
+            temiz = _ANSI_RE.sub("", self._tampon)
+            if temiz.strip():
+                self._yaz(temiz, C["text2"])
+                self._tampon = ""
+
+    def _isaret_baslangici_olabilir(self, tampon: str) -> bool:
+        """Tampon isareti iceriyor ya da isaretin bir onekiyle bitiyor mu?"""
+        if self._isaret in tampon:
+            return True
+        en_fazla = min(len(tampon), len(self._isaret) - 1)
+        return any(
+            tampon.endswith(self._isaret[:uzunluk])
+            for uzunluk in range(en_fazla, 0, -1)
+        )
+
+    def _satir_isle(self, satir: str) -> None:
+        temiz = _ANSI_RE.sub("", satir).replace("\r", "")
+        es = self._isaret_re.search(temiz)
+        if es is None:
+            if temiz.strip() or self.cikti.blockCount() > 1:
+                self._yaz(temiz + "\n", C["text2"])
+            return
+
+        # bitis isareti: kullaniciya gosterilmez, durum seride yansir
+        kod = es.group(1)
+        klasor = (es.group(2) or "").strip()
+        if klasor and Path(klasor).is_dir():
+            self.cwd = klasor
+            self.yol_etiketi.setText(klasor)
+
+        gecen = time.monotonic() - self._baslangic
+        renk = C["muted"] if kod == "0" else C["red"]
+        self._yaz(
+            f"{t('bitti')}  ·  {t('çıkış')} {kod}  ·  {gecen:.2f}s\n", renk
+        )
+        self._durum_ayarla(False)
 
     def _yaz(self, metin: str, renk: str) -> None:
         imlec = self.cikti.textCursor()
@@ -242,6 +389,7 @@ def git_calistir(cwd: str, *args: str, timeout: int = 30) -> tuple[bool, str]:
         proc = subprocess.run(
             ["git", *args], cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
+            creationflags=platform_.GIZLI_PENCERE,
         )
     except FileNotFoundError:
         return False, t("Git bulunamadı. https://git-scm.com adresinden kur.")
@@ -467,6 +615,7 @@ class GitPanel(QFrame):
             proc = subprocess.run(
                 ["gh", "auth", "status"], capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=10,
+                creationflags=platform_.GIZLI_PENCERE,
             )
         except FileNotFoundError:
             return False, ""
@@ -506,7 +655,7 @@ class GitPanel(QFrame):
             return f"https://github.com/{ham}"
         return ""
 
-    def _ilk_commit_komutu(self) -> str:
+    def _ilk_commit_komutu(self) -> list[str]:
         """Depo yoksa kurar, hic commit yoksa bir tane atar. Varsa hicbir sey yapmaz.
 
         Commit var mi kontrolu cikis koduyla yapilir: bos depoda

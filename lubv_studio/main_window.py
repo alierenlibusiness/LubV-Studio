@@ -13,26 +13,34 @@ from PySide6.QtWidgets import (
 
 from . import usage as usage_mod
 from .api import ApiError, DeepSeekClient
+from .balance import BalanceWatcher
 from .checkpoints import CheckpointStore
 from .chat import ChatPanel
-from .config import APP_NAME, APP_VERSION, Config
+from .config import APP_NAME, APP_VERSION, MODLAR, Config
 from .editor import EditorTabs, WelcomeView
 from .icons import ikon
 from .memory import MemoryStore
 from .panels import (
-    BrainPanel, CheckpointPanel, ExplorerPanel, MemoryPanel, SettingsPanel,
+    BrainPanel, CheckpointPanel, ExplorerPanel, MemoryPanel, SessionPanel,
+    SettingsPanel,
 )
+from .sessions import SessionStore
 from .terminal import GitPanel, Terminal
 from .i18n import t
 from .theme import C, qss
+from .widgets import Badge, BalanceBadge
 
+# Ipuclari t() ile modul yuklenirken cevrilirse dil ayari daha okunmadigi icin
+# Ingilizce arayuzde bile Turkce kaliyordu. Anahtarlar burada, ceviri kullanim
+# aninda yapiliyor.
 RAIL = [
-    ("dosyalar", t("Dosyalar")),
-    ("git", t("Kaynak kontrol ve GitHub")),
-    ("bellek", t("Bellek")),
-    ("beyin", t("Beyin, sistem prompt")),
-    ("geri", t("Geri al")),
-    ("ayarlar", t("Ayarlar ve harcama")),
+    ("dosyalar", "Dosyalar"),
+    ("oturum", "Oturumlar, geçmiş sohbetler"),
+    ("git", "Kaynak kontrol ve GitHub"),
+    ("bellek", "Bellek"),
+    ("beyin", "Beyin, sistem prompt"),
+    ("geri", "Geri al"),
+    ("ayarlar", "Ayarlar ve harcama"),
 ]
 
 
@@ -43,6 +51,7 @@ class MainWindow(QMainWindow):
         self.memory = MemoryStore(cfg.project_root)
         self.checkpoints = CheckpointStore(cfg.project_root)
         self.usage = usage_mod.UsageStore()
+        self.sessions = SessionStore()
         self.yeniden_baslat = False
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
@@ -52,13 +61,29 @@ class MainWindow(QMainWindow):
         self._arayuzu_kur()
         self._kisayollar()
         self._pencereyi_yerlestir()
+        self._bakiyeyi_baslat()
 
         if cfg.project_root and Path(cfg.project_root).is_dir():
             self.projeyi_ac(cfg.project_root, kaydet=False)
         else:
             QTimer.singleShot(350, self.klasor_sec)
 
+        self._son_oturumu_geri_yukle()
         QTimer.singleShot(800, self._modelleri_cek)
+
+    def _son_oturumu_geri_yukle(self) -> None:
+        """Uygulama kapanmadan once acik olan sohbeti geri getirir."""
+        kimlik = (self.cfg.last_session_id or "").strip()
+        if not kimlik:
+            return
+        kayit = self.sessions.yukle(kimlik)
+        if kayit is None or kayit.bos_mu:
+            return
+        # baska bir projenin sohbetiyle acilip kafa karistirmasin
+        if kayit.proje and self.cfg.project_root:
+            if Path(kayit.proje) != Path(self.cfg.project_root):
+                return
+        self._oturum_ac(kimlik)
 
     # ------------------------------------------------------------------
     # Arayuz
@@ -98,6 +123,7 @@ class MainWindow(QMainWindow):
         dikey = QVBoxLayout(kok)
         dikey.setContentsMargins(0, 0, 0, 0)
         dikey.setSpacing(0)
+        dikey.addWidget(self._ust_serit())
 
         govde = QHBoxLayout()
         govde.setContentsMargins(0, 0, 0, 0)
@@ -112,7 +138,8 @@ class MainWindow(QMainWindow):
         self.yan_panel = self._yan_panel()
         self.merkez = self._merkez()
         self.sohbet = ChatPanel(
-            self.cfg, self.memory, self.checkpoints, self.usage, parent=self
+            self.cfg, self.memory, self.checkpoints, self.usage,
+            sessions=self.sessions, parent=self,
         )
         self._sohbeti_bagla()
 
@@ -127,6 +154,66 @@ class MainWindow(QMainWindow):
         dikey.addLayout(govde, 1)
         dikey.addWidget(self._durum_serit())
 
+    def _ust_serit(self) -> QWidget:
+        """Pencerenin en ustunde duran serit: proje, bakiye, oturum harcamasi.
+
+        Bakiye burada surekli gorunur ve arka planda kendiliginden yenilenir;
+        kalan kredi icin hicbir panele girmek gerekmez.
+        """
+        serit = QFrame()
+        serit.setObjectName("HeaderBar")
+        serit.setFixedHeight(34)
+        d = QHBoxLayout(serit)
+        d.setContentsMargins(12, 0, 10, 0)
+        d.setSpacing(8)
+
+        marka = QLabel(APP_NAME)
+        marka.setObjectName("TopTitle")
+        marka.setStyleSheet(f"color:{C['accent']}; letter-spacing:0.6px;")
+
+        self.ust_proje = QLabel("")
+        self.ust_proje.setObjectName("TopPath")
+
+        self.ust_kip = Badge("", "accent")
+        self.ust_kip.setToolTip(t("Çalışma kipi"))
+
+        self.ust_oturum_maliyet = QLabel("")
+        self.ust_oturum_maliyet.setObjectName("StatusText")
+        self.ust_oturum_maliyet.setToolTip(t("Bu oturumda harcanan"))
+
+        self.bakiye_rozet = BalanceBadge()
+        self.bakiye_rozet.yenile_istendi.connect(self.bakiyeyi_yenile)
+        self.bakiye_rozet.setVisible(bool(self.cfg.show_balance))
+
+        d.addWidget(marka)
+        d.addWidget(self.ust_proje, 1)
+        d.addWidget(self.ust_kip)
+        d.addWidget(self.ust_oturum_maliyet)
+        d.addWidget(self.bakiye_rozet)
+        return serit
+
+    # ------------------------------------------------------------------
+    # Bakiye
+    # ------------------------------------------------------------------
+
+    def _bakiyeyi_baslat(self) -> None:
+        # Bilerek parent verilmiyor: ag istegi sirasinda pencere kapanirsa Qt
+        # cocuk QThread'i hala calisirken yok ediyor ve uygulama abort ediyordu.
+        # Referansi Python tarafinda tutuyoruz, sahipligi Qt'ye vermiyoruz.
+        self.bakiye_izleyici = BalanceWatcher(self.cfg)
+        self.bakiye_izleyici.guncellendi.connect(self._bakiye_geldi)
+        self.bakiye_izleyici.start()
+
+    def bakiyeyi_yenile(self) -> None:
+        izleyici = getattr(self, "bakiye_izleyici", None)
+        if izleyici is not None:
+            izleyici.hemen_yenile()
+
+    def _bakiye_geldi(self, bakiye) -> None:
+        self.bakiye_rozet.durum_yaz(bakiye)
+        if hasattr(self, "ayar_panel"):
+            self.ayar_panel.bakiyeyi_yaz(bakiye)
+
     def _rail(self) -> QFrame:
         rail = QFrame()
         rail.setObjectName("Rail")
@@ -139,7 +226,7 @@ class MainWindow(QMainWindow):
         for anahtar, ipucu in RAIL:
             dugme = QToolButton()
             dugme.setObjectName("RailButton")
-            dugme.setToolTip(ipucu)
+            dugme.setToolTip(t(ipucu))
             dugme.setCheckable(True)
             dugme.setCursor(Qt.CursorShape.PointingHandCursor)
             dugme.setFixedSize(QSize(46, 40))
@@ -177,6 +264,11 @@ class MainWindow(QMainWindow):
         self.gezgin.klasor_degistir.connect(self.klasor_sec)
         self.gezgin.baglama_ekle.connect(lambda y: self.sohbet.baglam_ekle(y))
 
+        self.oturum_panel = SessionPanel(self.sessions)
+        self.oturum_panel.oturum_secildi.connect(self._oturum_ac)
+        self.oturum_panel.yeni_istendi.connect(lambda: self.sohbet.yeni_sohbet())
+        self.oturum_panel.bildirim.connect(self.durum_yaz)
+
         self.git_panel = GitPanel()
         self.git_panel.komut_istendi.connect(self._terminalde_calistir)
 
@@ -195,8 +287,9 @@ class MainWindow(QMainWindow):
         self.ayar_panel.degisti.connect(self._ayarlar_degisti)
         self.ayar_panel.dil_degisti.connect(self._dili_degistir)
 
+        # sira RAIL ile birebir ayni olmali, panel_sec indekse gore secer
         for widget in (
-            self.gezgin, self.git_panel, self.bellek_panel,
+            self.gezgin, self.oturum_panel, self.git_panel, self.bellek_panel,
             self.beyin_panel, self.geri_panel, self.ayar_panel,
         ):
             self.panel_yigin.addWidget(widget)
@@ -269,6 +362,10 @@ class MainWindow(QMainWindow):
         self.sohbet.bellek_degisti.connect(self.bellek_panel_tazele)
         self.sohbet.kullanim_degisti.connect(self._durum_tazele)
         self.sohbet.komut_calisti.connect(self._ajan_komutu)
+        self.sohbet.oturum_degisti.connect(self.oturum_panel.tazele)
+        self.sohbet.kip_degisti.connect(lambda _: self._durum_tazele())
+        # istek biter bitmez bakiye tazelensin, harcama aninda gorunsun
+        self.sohbet.calisma_durumu.connect(self._calisma_durumu)
 
     def _kisayollar(self) -> None:
         def kisayol(dizi: str, islev) -> None:
@@ -314,8 +411,21 @@ class MainWindow(QMainWindow):
             self.geri_panel.tazele()
         elif anahtar == "ayarlar":
             self.ayar_panel.maliyet_tazele()
+            self.bakiyeyi_yenile()
         elif anahtar == "bellek":
             self.bellek_panel.tazele()
+        elif anahtar == "oturum":
+            self.oturum_panel.tazele(aktif_id=self.sohbet.oturum.id)
+
+    def _oturum_ac(self, oturum_id: str) -> None:
+        if self.sohbet.oturumu_yukle(oturum_id):
+            self.oturum_panel.tazele(aktif_id=oturum_id)
+            self._durum_tazele()
+
+    def _calisma_durumu(self, calisiyor: bool) -> None:
+        """Ajan durunca bakiyeyi hemen tazele; harcama ekrana aninda yansisin."""
+        if not calisiyor:
+            QTimer.singleShot(400, self.bakiyeyi_yenile)
 
     def yan_paneli_degistir(self) -> None:
         gorunur = self.yan_panel.isVisible()
@@ -353,7 +463,7 @@ class MainWindow(QMainWindow):
         if kaydet:
             self.cfg.remember_project(yol)
             self.cfg.save()
-            self.sekmeler.hepsini_kapat()
+            self.sekmeler.hepsini_kapat(sor=True)
 
         self.memory.set_project(yol)
         self.checkpoints.project_root = yol
@@ -362,13 +472,16 @@ class MainWindow(QMainWindow):
         self.terminal.set_cwd(yol)
         self.bellek_panel.tazele()
         self.geri_panel.tazele()
+        self.oturum_panel.tazele(aktif_id=self.sohbet.oturum.id)
         self.setWindowTitle(f"{Path(yol).name}  ·  {APP_NAME}")
         self._durum_tazele()
         self.durum_yaz(t("Proje açıldı: ") + yol)
 
     def _proje_tazele(self) -> None:
         self.gezgin.yenile()
-        if self.panel_yigin.currentIndex() == 1:
+        # indeks yerine widget kimligine bakilir: panel sirasi degisince
+        # sabit indeks yanlis paneli tazeliyordu
+        if self.panel_yigin.currentWidget() is self.git_panel:
             self.git_panel.yenile()
 
     def dosya_ac(self, yol: str, satir: int | None = None) -> None:
@@ -424,6 +537,8 @@ class MainWindow(QMainWindow):
     def _ayarlar_degisti(self) -> None:
         self.sohbet.model_rozetini_tazele()
         self._durum_tazele()
+        # anahtar veya gorunurluk degismis olabilir, bakiyeyi hemen sor
+        self.bakiyeyi_yenile()
 
     def _dili_degistir(self, _kod: str) -> None:
         """Dil degisince arayuzu bastan kurmak icin uygulamayi yeniden baslatir."""
@@ -462,6 +577,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "DeepSeek", sonuc)
         self.durum_yaz(sonuc)
         self._modelleri_cek()
+        self.bakiyeyi_yenile()
 
     # ------------------------------------------------------------------
     # Durum serit
@@ -473,13 +589,28 @@ class MainWindow(QMainWindow):
 
     def _durum_tazele(self) -> None:
         kok = self.cfg.project_root
-        self.durum_proje.setText(Path(kok).name if kok else t("proje seçilmedi"))
+        ad = Path(kok).name if kok else t("proje seçilmedi")
+        self.durum_proje.setText(ad)
         self.durum_proje.setToolTip(kok or "")
         self.durum_model.setText(self.cfg.model.replace("deepseek-", ""))
         self.durum_maliyet.setText(
             t("oturum ") + usage_mod.para(self.usage.oturum_maliyet) + "  ·  "
             + t("bugün ") + usage_mod.para(self.usage.bugun()["maliyet"])
         )
+
+        # ust serit
+        if hasattr(self, "ust_proje"):
+            self.ust_proje.setText(kok or t("proje seçilmedi"))
+            self.ust_proje.setToolTip(kok or "")
+            kip_adi = t("Code") if self.cfg.kip == "code" else t("Chat")
+            if self.cfg.kip == "code":
+                kip_adi += "  ·  " + t(MODLAR[self.cfg.mode][0])
+            self.ust_kip.setText(kip_adi)
+            self.ust_oturum_maliyet.setText(
+                t("oturum ") + usage_mod.para(self.usage.oturum_maliyet)
+            )
+            self.bakiye_rozet.setVisible(bool(self.cfg.show_balance))
+
         if hasattr(self, "ayar_panel"):
             self.ayar_panel.maliyet_tazele()
 
@@ -500,7 +631,13 @@ class MainWindow(QMainWindow):
             if cevap == QMessageBox.StandardButton.Save:
                 self.sekmeler.hepsini_kaydet()
 
+        izleyici = getattr(self, "bakiye_izleyici", None)
+        if izleyici is not None:
+            izleyici.durdur()
+            # devam eden bir istek varsa bitmesini bekle (istek zaman asimi 8 sn)
+            izleyici.wait(10000)
+
         self.sohbet.kapaniyor()
-        self.terminal._kabugu_kapat()
+        self.terminal.kabugu_kapat()
         self.cfg.save()
         super().closeEvent(event)

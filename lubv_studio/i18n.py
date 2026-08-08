@@ -284,6 +284,104 @@ EN: dict[str, str] = {
     "oturum ": "session ",
     "bugün ": "today ",
     "SEN": "YOU",
+
+    # ---- ust serit ve bakiye ----
+    "Çalışma kipi": "Working mode",
+    "Bu oturumda harcanan": "Spent in this session",
+    "Code": "Code",
+    "Chat": "Chat",
+    "Bakiye sorgulanıyor": "Checking balance",
+    "Bakiye alınamadı": "Balance unavailable",
+    "Kalan bakiye": "Remaining balance",
+    "KALAN BAKİYE": "REMAINING BALANCE",
+    "son güncelleme": "last updated",
+    "Bakiye azaldı, yüklemen gerekebilir.": "Balance is low, you may need to top up.",
+    "Yenilemek için tıkla": "Click to refresh",
+    "Bakiyeyi üst şeritte göster": "Show balance in the top bar",
+    "Bakiye yenileme (sn)": "Balance refresh (s)",
+
+    # ---- oturumlar ----
+    "Oturumlar": "Sessions",
+    "Oturumlar, geçmiş sohbetler": "Sessions, past chats",
+    "Yeni sohbet başlat": "Start a new chat",
+    "oturum ara": "search sessions",
+    "Aç": "Open",
+    "Adını değiştir": "Rename",
+    "Tümünü sil": "Delete all",
+    "Henüz kayıtlı oturum yok.": "No saved sessions yet.",
+    "proje yok": "no project",
+    " mesaj": " messages",
+    "Oturumu yeniden adlandır": "Rename session",
+    "Yeni ad:": "New name:",
+    "Oturum adı değiştirildi.": "Session renamed.",
+    "Bu oturum kalıcı olarak silinsin mi?": "Delete this session permanently?",
+    "Oturum silindi.": "Session deleted.",
+    "Kayıtlı bütün oturumlar silinsin mi? Bu geri alınamaz.":
+        "Delete every saved session? This cannot be undone.",
+    " oturum silindi.": " sessions deleted.",
+    "Oturum bulunamadı.": "Session not found.",
+    "Oturum açıldı: ": "Session opened: ",
+
+    # ---- kuyruk ve akis durumu ----
+    "sırada": "queued",
+    "Devam eden işe eklendi, LUBV bunu da dikkate alacak.":
+        "Added to the running job, LUBV will take it into account.",
+    "Sıraya alındı, bu iş biter bitmez başlayacak.":
+        "Queued, it will start as soon as this job finishes.",
+    "Sıradaki mesajlar iptal edildi.": "Queued messages were cancelled.",
+    "durduruluyor": "stopping",
+    "yeni mesaj işe katıldı": "new message folded into the job",
+    "sıradaki mesaja geçiliyor": "moving on to the queued message",
+
+    # ---- ajan adimlari ----
+    "sınırsız": "unlimited",
+    "Bir istek için LUBV'nin arka arkaya kaç adım atabileceği. "
+    "0 yazarsan sınır yoktur: işi bitirene kadar durmaz, sadece "
+    "Durdur tuşu keser.":
+        "How many steps LUBV may take in a row for one request. "
+        "Set it to 0 for no limit: it will not stop until the job is done, "
+        "only the Stop button interrupts it.",
+
+    # ---- prompt kurallari ----
+    "Prompt kuralları": "Prompt rules",
+    "İstek yazarken uyulmasını istediğin kurallar. LUBV bunları bilir; "
+    "isteğin eksik kaldığında hangi maddenin eksik olduğunu söyler ve "
+    "aynı isteğin düzgün halini örnek olarak yazar.":
+        "The rules you want followed when writing a request. LUBV knows them; "
+        "when your request is missing something it says which rule is missing "
+        "and writes a corrected version of the same request as an example.",
+    "Prompt kurallarını LUBV'ye öğret": "Teach the prompt rules to LUBV",
+    "Kuralları kaydet": "Save rules",
+    "Prompt kuralları kaydedildi.": "Prompt rules saved.",
+    "Prompt kuralları varsayılana döndü.": "Prompt rules reset to default.",
+
+    # ---- editor ----
+    "Kaydedilmemiş değişiklik var": "Unsaved changes",
+    " kaydedilsin mi?": " should it be saved?",
+
+    # ---- terminal ----
+    "Durdur": "Stop",
+    "Çalışan komutu keser": "Interrupts the running command",
+    "komut kesildi": "command interrupted",
+    "bitti": "done",
+    "çıkış": "exit",
+    "Kabuk kapandı": "The shell exited",
+    "Yeniden başlat.": "Restart it.",
+
+    # ---- arac karti sonuclari ----
+    "satır": "lines",
+    "boş dosya": "empty file",
+    "öğe": "items",
+    "sonuç yok": "no results",
+    "eşleşme": "matches",
+    "çalıştı": "ran",
+    "yazıldı": "written",
+    "silindi": "deleted",
+    "sonuç": "results",
+    "arandı": "searched",
+    "karakter": "characters",
+    "kaydedildi": "saved",
+    "dk": "min",
 }
 
 

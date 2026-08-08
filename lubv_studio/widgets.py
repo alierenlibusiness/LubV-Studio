@@ -10,7 +10,7 @@ from PySide6.QtGui import (
     QColor, QFontMetrics, QIcon, QPainter, QPixmap, QTextOption,
 )
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+    QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
     QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -18,7 +18,7 @@ from . import render
 from .icons import ikon
 from .i18n import t
 from .theme import C
-from .tools import AGAC_GIZLI, ToolCall, insan_boyut
+from .tools import AGAC_GIZLI, ToolCall, insan_boyut, sure_metni
 
 
 # --------------------------------------------------------------------------
@@ -60,6 +60,51 @@ class Badge(QLabel):
         self.setProperty("tone", tone)
         self.style().unpolish(self)
         self.style().polish(self)
+
+
+class BalanceBadge(QPushButton):
+    """Ust seritte duran canli bakiye rozeti.
+
+    Tiklaninca hemen yenilenir. Renk bakiyeye gore degisir: normalde yesil,
+    1 birimin altina inince amber, veri alinamiyorsa sonuk gri. Boylece
+    "param bitmis mi" sorusu icin hicbir yere girmek gerekmez.
+    """
+
+    yenile_istendi = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("BalanceBadge")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFlat(True)
+        self.setIcon(ikon("cuzdan", C["muted"], 13))
+        self.setIconSize(QSize(13, 13))
+        self.clicked.connect(self.yenile_istendi.emit)
+        self.durum_yaz(None)
+
+    def durum_yaz(self, bakiye) -> None:
+        if bakiye is None:
+            metin, renk, ipucu = "...", C["muted"], t("Bakiye sorgulanıyor")
+        elif not bakiye.gecerli:
+            metin, renk = "--", C["muted"]
+            ipucu = bakiye.mesaj or t("Bakiye alınamadı")
+        else:
+            metin = bakiye.metin
+            renk = C["amber"] if bakiye.dusuk_mu else C["accent_hi"]
+            an = time.strftime("%H:%M:%S", time.localtime(bakiye.zaman))
+            ipucu = f"{t('Kalan bakiye')}: {bakiye.metin}\n{t('son güncelleme')}: {an}"
+            if bakiye.dusuk_mu:
+                ipucu += "\n" + t("Bakiye azaldı, yüklemen gerekebilir.")
+
+        self.setText(f"  {metin}")
+        self.setIcon(ikon("cuzdan", renk, 13))
+        self.setToolTip(ipucu + "\n" + t("Yenilemek için tıkla"))
+        self.setStyleSheet(
+            f"QPushButton#BalanceBadge{{background:{C['bg2']}; border:1px solid {C['line2']};"
+            f"border-radius:7px; padding:2px 9px; color:{renk}; font-size:11.5px;"
+            "font-weight:700; min-height:16px;}"
+            f"QPushButton#BalanceBadge:hover{{border-color:{renk};}}"
+        )
 
 
 class AutoTextBrowser(QTextBrowser):
@@ -176,10 +221,10 @@ class ReasoningBox(QFrame):
         self._basligi_yaz()
 
     def _basligi_yaz(self, bitti: bool = False) -> None:
-        ok = "v" if self.acik else ">"
+        ok = "▾" if self.acik else "▸"
         kelime = len(self.ham.split())
         etiket = t("Düşündü") if bitti else t("Düşünüyor")
-        self.baslik.setText(f"  {ok}  {etiket}   ({kelime} kelime)")
+        self.baslik.setText(f"  {ok}  {etiket}   ({kelime}{t(' kelime')})")
 
     def append(self, parca: str) -> None:
         self.ham += parca
@@ -274,10 +319,15 @@ class ToolCard(QFrame):
 
     def tamamla(self, call: ToolCall) -> None:
         self.call = call
+        sure = sure_metni(call.duration)
+
         if call.approved is False:
             durum, tone, etiket = "denied", "", t("reddedildi")
         elif call.ok:
-            durum, tone, etiket = "ok", "green", f"{call.duration:.1f}s"
+            # Sure rozeti okuma gibi hizli islerde "0.0s" yaziyordu ve is
+            # yapilmamis gibi gorunuyordu. Artik ne yapildigi yaziyor.
+            durum, tone = "ok", "green"
+            etiket = call.ozet or sure
         else:
             durum, tone, etiket = "fail", "red", t("hata")
 
@@ -286,13 +336,14 @@ class ToolCard(QFrame):
         self.style().polish(self)
         self.rozet.setText(etiket)
         self.rozet.set_tone(tone)
+        self.rozet.setToolTip(f"{t(call.label)}  ·  {sure}")
         self.hedef.setToolTip(self.call.target)
         self.hedef.setText(self._hedef_metni())
 
         renk = C["text2"] if call.ok else "#FF9C95"
-        self.cikti.setHtml(render.plain_to_html(call.output[:8000], renk))
-        if not call.ok:
-            self.degistir()
+        self.cikti.setHtml(render.plain_to_html((call.output or "")[:8000], renk))
+        if not call.ok and not self.acik:
+            self.degistir()   # hatayi kullanici acmadan gorsun
 
 
 # --------------------------------------------------------------------------
@@ -402,8 +453,17 @@ UZANTI_RENK = {
 }
 
 
+KLASOR_ROL = Qt.ItemDataRole.UserRole + 2      # bu satir bir klasor mu
+OK_ALANI = 16                                   # ok isareti icin ayrilan genislik
+
+
 class FileTree(QTreeWidget):
-    """Proje klasoru agaci. Cift tik ile dosya acar."""
+    """Proje klasoru agaci.
+
+    Klasorlerin solunda VS Code'daki gibi ok isareti cizilir: kapaliyken saga,
+    acikken asagi bakar. Qt'nin varsayilan dallanma cizgileri koyu temada zar
+    zor gorundugu icin oklar burada elle ciziliyor.
+    """
 
     dosya_secildi = Signal(str)
 
@@ -411,12 +471,45 @@ class FileTree(QTreeWidget):
         super().__init__(parent)
         self.kok = ""
         self.setHeaderHidden(True)
-        self.setIndentation(14)
+        self.setIndentation(OK_ALANI)
+        self.setRootIsDecorated(True)
         self.setAnimated(True)
+        self.setUniformRowHeights(True)
         self.setExpandsOnDoubleClick(False)
+        self.setIconSize(QSize(14, 14))
         self.itemDoubleClicked.connect(self._acildi)
+        self.itemClicked.connect(self._tiklandi)
         self.itemExpanded.connect(self._genislet)
+        self.itemExpanded.connect(self._klasor_simgesi_tazele)
+        self.itemCollapsed.connect(self._klasor_simgesi_tazele)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+
+    # ---------- ok isaretleri ----------
+
+    @staticmethod
+    def klasor_mu(item: QTreeWidgetItem) -> bool:
+        return bool(item.data(0, KLASOR_ROL))
+
+    def drawBranches(self, painter, rect, index):  # noqa: N802 (Qt API)
+        """Klasorlerin soluna acilma okunu cizer, dosyalarda bos birakir."""
+        item = self.itemFromIndex(index)
+        if item is None or not self.klasor_mu(item):
+            return
+
+        ad = "ok_asagi" if item.isExpanded() else "ok_sag"
+        renk = C["text2"] if item.isExpanded() else C["muted"]
+        boyut = 10
+        simge = ikon(ad, renk, boyut).pixmap(boyut, boyut)
+        # ok, satirin kendi girinti seviyesinde durur: her alt klasor bir
+        # kademe iceri kayar, hiyerarsi gozle takip edilebilir olur
+        x = rect.right() - OK_ALANI + (OK_ALANI - boyut) // 2
+        y = rect.top() + (rect.height() - boyut) // 2
+        painter.drawPixmap(x, y, simge)
+
+    def _klasor_simgesi_tazele(self, item: QTreeWidgetItem) -> None:
+        if self.klasor_mu(item):
+            item.setIcon(0, ikon("klasor" if item.isExpanded() else "klasor_kapali",
+                                 C["muted"], 14))
 
     def yukle(self, kok: str) -> None:
         self.kok = kok
@@ -466,17 +559,22 @@ class FileTree(QTreeWidget):
         for yol in girdiler:
             item = QTreeWidgetItem(ebeveyn)
             item.setData(0, Qt.ItemDataRole.UserRole, str(yol))
+            item.setText(0, yol.name)
             if yol.is_dir():
-                item.setText(0, yol.name)
-                item.setIcon(0, _renkli_nokta(C["muted"], 7))
+                item.setData(0, KLASOR_ROL, True)
+                item.setIcon(0, ikon("klasor_kapali", C["muted"], 14))
+                item.setToolTip(0, str(yol))
                 item.setChildIndicatorPolicy(
                     QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
                 )
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, False)  # yuklenmedi
             else:
-                item.setText(0, yol.name)
+                item.setData(0, KLASOR_ROL, False)
                 renk = UZANTI_RENK.get(yol.suffix.lower(), C["line2"])
                 item.setIcon(0, _renkli_nokta(renk))
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
+                )
                 try:
                     item.setToolTip(0, f"{yol}  ·  {insan_boyut(yol.stat().st_size)}")
                 except Exception:
@@ -491,15 +589,35 @@ class FileTree(QTreeWidget):
         if yol:
             self._klasor_doldur(Path(yol), item)
         item.setData(0, Qt.ItemDataRole.UserRole + 1, True)
+        if item.childCount() == 0:
+            # bos klasorde ok isareti kalmasin, yanlis beklenti yaratiyor
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
+            )
+
+    def _tiklandi(self, item: QTreeWidgetItem, _sutun: int) -> None:
+        """Klasorde tek tik acar/kapatir; VS Code'da da boyle calisir.
+
+        Cift tikin ikinci tiki da buraya dusuyor ve klasoru hemen geri
+        kapatiyordu. Cift tik araligindaki ikinci tik yok sayilir.
+        """
+        if not self.klasor_mu(item):
+            return
+        simdi = time.monotonic()
+        aralik = QApplication.doubleClickInterval() / 1000.0
+        onceki = getattr(self, "_son_tik", None)
+        if onceki and onceki[0] is item and simdi - onceki[1] < aralik:
+            return
+        self._son_tik = (item, simdi)
+        item.setExpanded(not item.isExpanded())
 
     def _acildi(self, item: QTreeWidgetItem, _sutun: int) -> None:
         yol = item.data(0, Qt.ItemDataRole.UserRole)
         if not yol:
             return
-        if Path(yol).is_dir():
-            item.setExpanded(not item.isExpanded())
-        else:
-            self.dosya_secildi.emit(yol)
+        if self.klasor_mu(item):
+            return  # cift tik klasorde tek tikla ayni islemi tekrarlamasin
+        self.dosya_secildi.emit(yol)
 
     def secili_yol(self) -> str:
         item = self.currentItem()

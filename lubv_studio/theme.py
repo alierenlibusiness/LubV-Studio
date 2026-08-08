@@ -180,6 +180,20 @@ QFrame#BottomBar {{
 QLabel#TopTitle {{ font-size: 13px; font-weight: 700; }}
 QLabel#TopPath {{ color: {C['muted']}; font-size: 11.5px; }}
 
+/* pencerenin en ustundeki serit: proje, kip, harcama, bakiye */
+QFrame#HeaderBar {{
+    background: {C['bg1']};
+    border-bottom: 1px solid {C['line']};
+}}
+QLabel#QueueLabel {{
+    color: {C['amber']};
+    font-size: 11.5px;
+    background: {C['amber_dim']};
+    border: 1px solid {C['amber_dim']};
+    border-radius: {R_KUCUK}px;
+    padding: 3px 8px;
+}}
+
 /* ============ butonlar ============ */
 QPushButton {{
     background: {C['bg2']};
@@ -456,15 +470,18 @@ QSplitter::handle:hover {{ background: {C['accent']}; }}
 /* ============ sekmeler ============ */
 QTabWidget::pane {{ border: none; background: {C['kod']}; }}
 QTabBar {{ background: {C['bg1']}; qproperty-drawBase: 0; }}
+/* Kapatma dugmesi sekmenin icinde durur: sagda 6px, solda 12px bosluk
+   birakiliyor ki dugme metne yapismasin ve sekme kenarindan tasmasin. */
 QTabBar::tab {{
     background: {C['bg1']};
     color: {C['muted']};
     border: none;
     border-right: 1px solid {C['line']};
     border-top: 2px solid transparent;
-    padding: 6px 14px;
+    padding: 5px 6px 5px 12px;
     font-size: 12px;
-    min-width: 60px;
+    min-width: 76px;
+    max-width: 240px;
 }}
 QTabBar::tab:selected {{
     background: {C['kod']};
@@ -472,13 +489,16 @@ QTabBar::tab:selected {{
     border-top: 2px solid {C['accent']};
 }}
 QTabBar::tab:hover:!selected {{ background: {C['bg3']}; color: {C['text2']}; }}
+QTabBar::close-button {{ image: none; width: 0px; }}
 QToolButton#TabClose {{
     background: transparent;
     border: none;
-    border-radius: 8px;
-    margin-left: 2px;
+    border-radius: 9px;
+    margin: 0px 0px 0px 6px;
+    padding: 0px;
 }}
 QToolButton#TabClose:hover {{ background: {C['bg4']}; }}
+QToolButton#TabClose:pressed {{ background: {C['red_dim']}; }}
 
 /* ============ diyalog ============ */
 QMessageBox {{ background: {C['bg1']}; }}

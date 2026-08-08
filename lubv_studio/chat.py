@@ -15,6 +15,7 @@ from .agent import AgentWorker
 from .config import KIPLER, MODLAR
 from .icons import ikon
 from .i18n import t
+from .sessions import Session, SessionStore
 from .theme import C, GRADYAN, GRADYAN_HOVER
 from .tools import ToolCall, Workspace
 from .widgets import (
@@ -215,12 +216,15 @@ class ChatPanel(QFrame):
     kip_degisti = Signal(str)
     komut_calisti = Signal(str, str, bool)   # ajan terminal komutu calistirdi
 
-    def __init__(self, cfg, memory, checkpoints, usage_store, parent=None) -> None:
+    oturum_degisti = Signal()            # oturum listesi tazelensin
+
+    def __init__(self, cfg, memory, checkpoints, usage_store, sessions=None, parent=None) -> None:
         super().__init__(parent)
         self.cfg = cfg
         self.memory = memory
         self.checkpoints = checkpoints
         self.usage = usage_store
+        self.oturumlar = sessions or SessionStore()
 
         self.gecmis: list[dict] = []
         self.worker: AgentWorker | None = None
@@ -228,6 +232,12 @@ class ChatPanel(QFrame):
         self.aktif_dusunce: ReasoningBox | None = None
         self.arac_kartlari: dict[int, ToolCard] = {}
         self.baglam_dosyalari: list[str] = []
+        # ajan calisirken yazilan ve sirasini bekleyen mesajlar
+        self.kuyruk: list[str] = []
+        self.oturum = Session(proje=cfg.project_root, kip=cfg.kip, mod=cfg.mode,
+                              model=cfg.model)
+        self._durduruldu = False
+        self._basliyor = False    # kosu zamanlandi, henuz baslamadi
 
         self.setMinimumWidth(360)
         duzen = QVBoxLayout(self)
@@ -331,6 +341,12 @@ class ChatPanel(QFrame):
         self.baglam_duzen.setSpacing(5)
         self.baglam_serit.setVisible(False)
 
+        # sirada bekleyen mesajlar burada gorunur
+        self.kuyruk_etiketi = QLabel("")
+        self.kuyruk_etiketi.setObjectName("QueueLabel")
+        self.kuyruk_etiketi.setWordWrap(True)
+        self.kuyruk_etiketi.setVisible(False)
+
         self.giris = Composer()
         self.giris.gonder.connect(self.gonder)
         self.giris.dur.connect(self.durdur)
@@ -341,9 +357,19 @@ class ChatPanel(QFrame):
         self.durum_etiketi.setVisible(False)
 
         d.addWidget(self.baglam_serit)
+        d.addWidget(self.kuyruk_etiketi)
         d.addWidget(self.durum_etiketi)
         d.addWidget(self.giris)
         return kutu
+
+    def _kuyrugu_ciz(self) -> None:
+        if not self.kuyruk:
+            self.kuyruk_etiketi.setVisible(False)
+            return
+        ilk = " ".join(self.kuyruk[0].split())[:60]
+        ek = f"  (+{len(self.kuyruk) - 1})" if len(self.kuyruk) > 1 else ""
+        self.kuyruk_etiketi.setText(f"{t('sırada')}: {ilk}{ek}")
+        self.kuyruk_etiketi.setVisible(True)
 
     # ------------------------------------------------------------------
     # Akisa ekleme
@@ -384,14 +410,27 @@ class ChatPanel(QFrame):
     def yeni_sohbet(self, ilk: bool = False) -> None:
         if self.worker is not None and self.worker.isRunning():
             self.durdur()
+        if not ilk:
+            # acik oturum kaybolmasin, once diske yazilir
+            self.oturum.mesajlar = list(self.gecmis)
+            self._oturumu_kaydet()
+
         self.gecmis = []
+        self.kuyruk = []
         self.arac_kartlari = {}
         self.aktif_balon = None
         self.aktif_dusunce = None
+        self.oturum = Session(
+            proje=self.cfg.project_root, kip=self.cfg.kip,
+            mod=self.cfg.mode, model=self.cfg.model,
+        )
         self.temizle_akis()
         self._bos_durum()
+        if hasattr(self, "kuyruk_etiketi"):
+            self._kuyrugu_ciz()
         if not ilk:
             self.durum.emit(t("Yeni sohbet başladı."))
+            self.oturum_degisti.emit()
 
     def _bos_durum(self) -> None:
         """Sohbet bosken ortada duran sade karsilama."""
@@ -514,8 +553,6 @@ class ChatPanel(QFrame):
         self.model_rozet.setText(self._model_kisa())
 
     def gonder(self) -> None:
-        if self.worker is not None and self.worker.isRunning():
-            return
         metin = self.giris.toPlainText().strip()
         if not metin:
             return
@@ -535,21 +572,59 @@ class ChatPanel(QFrame):
 
         self.giris.clear()
         self._ekle(MessageBubble("user", metin))
+        self.oturum.olay_ekle("user", metin=metin)
 
         tam_mesaj = self._baglam_metni() + metin
         self.baglam_dosyalari = []
         self._baglam_ciz()
 
+        # _basliyor: kuyruktaki is icin zamanlanmis ama henuz baslamamis kosu
+        mesgul = (self.worker is not None and self.worker.isRunning()) or self._basliyor
+        if mesgul:
+            self._calisirken_ekle(tam_mesaj)
+            return
+
         self.gecmis.append({"role": "user", "content": tam_mesaj})
         self._gecmisi_kirp()
         self._calistir()
 
+    def _calisirken_ekle(self, tam_mesaj: str) -> None:
+        """Ajan calisirken yazilan mesaji ise katar veya siraya alir.
+
+        Once calisan ajana verilir: bir sonraki adimda ayni isin icinde
+        degerlendirir. Ajan tam o sirada bitmisse mesaj kuyruga alinir ve
+        biter bitmez yeni bir kosu baslatilir. Iki durumda da mesaj kaybolmaz.
+        """
+        calisan = self.worker
+        if calisan is not None and calisan.isRunning() and calisan.mesaj_ekle(tam_mesaj):
+            self._sistem_notu(t("Devam eden işe eklendi, LUBV bunu da dikkate alacak."))
+            return
+        self.kuyruk.append(tam_mesaj)
+        self._kuyrugu_ciz()
+        self._sistem_notu(t("Sıraya alındı, bu iş biter bitmez başlayacak."))
+
     def _gecmisi_kirp(self) -> None:
-        limit = max(6, self.cfg.history_limit)
-        if len(self.gecmis) > limit:
-            self.gecmis = self.gecmis[-limit:]
+        """Uzun gecmisi kirpar ama ilk kullanici istegini her zaman korur.
+
+        Duz kirpma yapilinca asil gorev tanimi baglamdan dusuyor ve model ne
+        yaptigini unutup isi yarida birakiyordu.
+        """
+        limit = max(8, self.cfg.history_limit)
+        if len(self.gecmis) <= limit:
+            return
+        ilk_istek = next((m for m in self.gecmis if m.get("role") == "user"), None)
+        kirpik = self.gecmis[-limit:]
+        if ilk_istek is not None and ilk_istek not in kirpik:
+            kirpik.insert(0, ilk_istek)
+        self.gecmis = kirpik
 
     def _calistir(self) -> None:
+        # Kuyruktaki isi zamanlayiciyla baslatiyoruz; o aralikta kullanici
+        # Enter'a basarsa iki worker ayni panele akar ve calisan thread'in son
+        # referansi kaybolur. Tek giris noktasi burasi, koruma da burada.
+        if self.worker is not None and self.worker.isRunning():
+            return
+        self._basliyor = False
         self.aktif_balon = None
         self.aktif_dusunce = None
         self.arac_kartlari = {}
@@ -567,21 +642,31 @@ class ChatPanel(QFrame):
         self.worker.delta_content.connect(self._metin_geldi)
         self.worker.delta_reasoning.connect(self._dusunce_geldi)
         self.worker.step_started.connect(self._tur_basladi)
+        self.worker.step_text_done.connect(self._tur_metni_bitti)
         self.worker.tool_started.connect(self._arac_basladi)
         self.worker.tool_finished.connect(self._arac_bitti)
         self.worker.approval_request.connect(self._onay_sor)
         self.worker.usage_reported.connect(self._kullanim_geldi)
         self.worker.memory_changed.connect(self.bellek_degisti.emit)
+        self.worker.uyari.connect(self._uyari_geldi)
+        self.worker.mesaj_alindi.connect(self._ara_mesaj_islendi)
         self.worker.failed.connect(self._hata)
         self.worker.done.connect(self._bitti)
 
+        self._durduruldu = False
         self._mesgul(True)
         self.worker.start()
 
     def durdur(self) -> None:
-        if self.worker is not None:
+        if self.worker is not None and self.worker.isRunning():
+            self._durduruldu = True
             self.worker.cancel()
-            self.durum_etiketi.setText("durduruluyor…")
+            self.durum_etiketi.setText(t("durduruluyor") + "...")
+        self._basliyor = False
+        if self.kuyruk:
+            self.kuyruk = []
+            self._kuyrugu_ciz()
+            self._sistem_notu(t("Sıradaki mesajlar iptal edildi."))
 
     def _mesgul(self, calisiyor: bool) -> None:
         self.giris.durumu_yaz(calisiyor)
@@ -604,6 +689,11 @@ class ChatPanel(QFrame):
                 t("adım ") + str(tur) + "  ·  "
                 + t(MODLAR[self.cfg.mode][0]).lower() + t(" modu")
             )
+
+    def _tur_metni_bitti(self, metin: str) -> None:
+        """O turun temiz metnini oturum dokumune yazar."""
+        if metin.strip():
+            self.oturum.olay_ekle("assistant", metin=metin)
 
     def _balon_hazirla(self) -> MessageBubble:
         if self.aktif_balon is None:
@@ -642,6 +732,13 @@ class ChatPanel(QFrame):
             kart = ToolCard(call)
             self._ekle(kart)
         kart.tamamla(call)
+
+        # dokume yaz: oturum tekrar acildiginda ayni kart geri cizilir
+        self.oturum.olay_ekle(
+            "arac", kind=call.kind, target=call.target, ok=bool(call.ok),
+            output=(call.output or "")[:8000], duration=call.duration,
+            approved=call.approved, ozet=call.ozet,
+        )
 
         if call.kind == "run":
             self.komut_calisti.emit(call.target, call.output or "", bool(call.ok))
@@ -689,8 +786,17 @@ class ChatPanel(QFrame):
             f"{usage_mod.para(kullanim.maliyet)}"
         )
 
+    def _uyari_geldi(self, mesaj: str) -> None:
+        """Olumcul olmayan bilgi: yeniden deneme, kopan akis, bos cevap."""
+        self._sistem_notu(mesaj)
+        self.oturum.olay_ekle("sistem", metin=mesaj, tone="")
+
+    def _ara_mesaj_islendi(self, _metin: str) -> None:
+        self.durum_etiketi.setText(t("yeni mesaj işe katıldı"))
+
     def _hata(self, mesaj: str) -> None:
         self._sistem_notu(mesaj, "red")
+        self.oturum.olay_ekle("sistem", metin=mesaj, tone="red")
 
     def _bitti(self, yeni_mesajlar: list) -> None:
         if self.aktif_dusunce is not None:
@@ -700,10 +806,101 @@ class ChatPanel(QFrame):
 
         self.gecmis.extend(yeni_mesajlar)
         self._gecmisi_kirp()
-        self._mesgul(False)
+
+        # ajan bitmeden hemen once eklenmis, islenmemis mesajlar varsa kaybolmasin
+        bekleyen = self.worker.kalan_mesajlar() if self.worker is not None else []
         self.worker = None
+
+        self.oturum.mesajlar = list(self.gecmis)
+        self._oturumu_kaydet()
         self.proje_degisti.emit()
+
+        sirada = bekleyen + self.kuyruk
+        self.kuyruk = []
+        self._kuyrugu_ciz()
+
+        if sirada and not self._durduruldu:
+            for metin in sirada:
+                self.gecmis.append({"role": "user", "content": metin})
+            self._gecmisi_kirp()
+            self.durum_etiketi.setText(t("sıradaki mesaja geçiliyor"))
+            self._basliyor = True   # bu aralikta gelen mesaj kuyruga gitsin
+            QTimer.singleShot(120, self._calistir)
+            return
+
+        self._mesgul(False)
         QTimer.singleShot(60, self._en_alta)
+
+    # ------------------------------------------------------------------
+    # Oturum yonetimi
+    # ------------------------------------------------------------------
+
+    def _oturumu_kaydet(self) -> None:
+        if self.oturum.bos_mu:
+            return
+        self.oturum.proje = self.cfg.project_root
+        self.oturum.kip = self.cfg.kip
+        self.oturum.mod = self.cfg.mode
+        self.oturum.model = self.cfg.model
+        self.oturum.maliyet = self.usage.oturum_maliyet
+        if self.oturumlar.kaydet(self.oturum):
+            self.cfg.last_session_id = self.oturum.id
+            self.oturum_degisti.emit()
+
+    def oturumu_yukle(self, oturum_id: str) -> bool:
+        """Kayitli bir oturumu acar ve ekrani dokumden yeniden cizer."""
+        kayit = self.oturumlar.yukle(oturum_id)
+        if kayit is None:
+            self._sistem_notu(t("Oturum bulunamadı."), "red")
+            return False
+
+        if self.worker is not None and self.worker.isRunning():
+            self.durdur()
+            self.worker.wait(2500)
+
+        # acik olani once guvene al, yoksa son mesajlar kaybolur
+        self.oturum.mesajlar = list(self.gecmis)
+        self._oturumu_kaydet()
+
+        self.oturum = kayit
+        self.gecmis = list(kayit.mesajlar or [])
+        self.kuyruk = []
+        self._kuyrugu_ciz()
+        self.arac_kartlari = {}
+        self.aktif_balon = None
+        self.aktif_dusunce = None
+        self.temizle_akis()
+        self._dokumu_ciz(kayit)
+        self.cfg.last_session_id = kayit.id
+        self.cfg.save()
+        self.durum.emit(t("Oturum açıldı: ") + kayit.gorunen_baslik)
+        return True
+
+    def _dokumu_ciz(self, kayit: Session) -> None:
+        """Kayitli olaylardan sohbet ekranini yeniden olusturur."""
+        if not kayit.olaylar:
+            self._bos_durum()
+            return
+        for olay in kayit.olaylar:
+            tip = olay.get("tip")
+            if tip in ("user", "assistant"):
+                self._ekle(MessageBubble(tip, olay.get("metin", "")))
+            elif tip == "arac":
+                call = ToolCall(
+                    kind=olay.get("kind", "read"),
+                    target=olay.get("target", ""),
+                    ok=olay.get("ok"),
+                    output=olay.get("output", ""),
+                    duration=float(olay.get("duration", 0.0)),
+                    approved=olay.get("approved"),
+                    ozet=olay.get("ozet", ""),
+                )
+                kart = ToolCard(call)
+                self._ekle(kart)
+                kart.tamamla(call)
+            elif tip == "sistem":
+                self._sistem_notu(olay.get("metin", ""), olay.get("tone", ""))
+        QTimer.singleShot(80, self._en_alta)
 
     # ------------------------------------------------------------------
 
@@ -711,3 +908,5 @@ class ChatPanel(QFrame):
         if self.worker is not None and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait(2500)
+        self.oturum.mesajlar = list(self.gecmis)
+        self._oturumu_kaydet()

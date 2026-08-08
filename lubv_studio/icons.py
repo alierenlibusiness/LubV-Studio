@@ -289,6 +289,91 @@ def _chevron(b: QPainter, renk: str) -> None:
     b.drawPath(yol)
 
 
+def _ok_sag(b: QPainter, renk: str) -> None:
+    """Kapali klasor: saga bakan ince ok (VS Code'daki gibi)."""
+    _kalem_ayarla(b, renk, KALINLIK + 0.3)
+    yol = QPainterPath()
+    yol.moveTo(9.5, 5.5)
+    yol.lineTo(16.0, 12.0)
+    yol.lineTo(9.5, 18.5)
+    b.drawPath(yol)
+
+
+def _ok_asagi(b: QPainter, renk: str) -> None:
+    """Acik klasor: asagi bakan ince ok."""
+    _kalem_ayarla(b, renk, KALINLIK + 0.3)
+    yol = QPainterPath()
+    yol.moveTo(5.5, 9.5)
+    yol.lineTo(12.0, 16.0)
+    yol.lineTo(18.5, 9.5)
+    b.drawPath(yol)
+
+
+def _klasor(b: QPainter, renk: str) -> None:
+    """Kapali klasor govdesi."""
+    _kalem_ayarla(b, renk, KALINLIK - 0.2)
+    yol = QPainterPath()
+    yol.moveTo(3.5, 18.5)
+    yol.lineTo(3.5, 6.0)
+    yol.lineTo(9.2, 6.0)
+    yol.lineTo(11.0, 8.4)
+    yol.lineTo(20.5, 8.4)
+    yol.lineTo(20.5, 18.5)
+    yol.closeSubpath()
+    b.drawPath(yol)
+
+
+def _dosya(b: QPainter, renk: str) -> None:
+    """Tek dosya: kivrik koseli sayfa."""
+    _kalem_ayarla(b, renk, KALINLIK - 0.2)
+    yol = QPainterPath()
+    yol.moveTo(6.0, 3.5)
+    yol.lineTo(14.0, 3.5)
+    yol.lineTo(18.5, 8.0)
+    yol.lineTo(18.5, 20.5)
+    yol.lineTo(6.0, 20.5)
+    yol.closeSubpath()
+    b.drawPath(yol)
+    kose = QPainterPath()
+    kose.moveTo(14.0, 3.5)
+    kose.lineTo(14.0, 8.0)
+    kose.lineTo(18.5, 8.0)
+    b.drawPath(kose)
+
+
+def _oturum(b: QPainter, renk: str) -> None:
+    """Sohbet oturumlari: ust uste iki konusma balonu."""
+    _kalem_ayarla(b, renk)
+    arka = QPainterPath()
+    arka.moveTo(7.5, 5.0)
+    arka.lineTo(19.0, 5.0)
+    arka.cubicTo(20.4, 5.0, 20.4, 6.4, 20.4, 6.4)
+    arka.lineTo(20.4, 12.0)
+    b.drawPath(arka)
+    on = QPainterPath()
+    on.moveTo(5.0, 10.2)
+    on.cubicTo(3.6, 10.2, 3.6, 11.6, 3.6, 11.6)
+    on.lineTo(3.6, 16.6)
+    on.cubicTo(3.6, 18.0, 5.0, 18.0, 5.0, 18.0)
+    on.lineTo(7.4, 18.0)
+    on.lineTo(7.4, 21.0)
+    on.lineTo(10.8, 18.0)
+    on.lineTo(15.6, 18.0)
+    on.cubicTo(17.0, 18.0, 17.0, 16.6, 17.0, 16.6)
+    on.lineTo(17.0, 11.6)
+    on.cubicTo(17.0, 10.2, 15.6, 10.2, 15.6, 10.2)
+    on.closeSubpath()
+    b.drawPath(on)
+
+
+def _cuzdan(b: QPainter, renk: str) -> None:
+    """Bakiye rozeti icin cuzdan."""
+    _kalem_ayarla(b, renk)
+    b.drawRoundedRect(QRectF(3.6, 6.4, 16.8, 12.2), 2.6, 2.6)
+    b.drawLine(QPointF(3.6, 10.2), QPointF(20.4, 10.2))
+    b.drawEllipse(QPointF(16.4, 14.4), 1.3, 1.3)
+
+
 CIZIMLER = {
     "dosyalar": _dosyalar,
     "git": _git,
@@ -311,6 +396,12 @@ CIZIMLER = {
     "baglanti": _baglanti,
     "liste": _liste,
     "chevron": _chevron,
+    "ok_sag": _ok_sag,
+    "ok_asagi": _ok_asagi,
+    "klasor_kapali": _klasor,
+    "dosya": _dosya,
+    "oturum": _oturum,
+    "cuzdan": _cuzdan,
 }
 
 _ONBELLEK: dict[tuple[str, str, int], QIcon] = {}
