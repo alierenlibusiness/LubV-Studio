@@ -62,9 +62,9 @@ Neither should change how you work; they just explain the numbers.
 
 ## Where the meter is
 
-**Status bar** — session and today, always visible.
+**Status bar:** session and today, always visible.
 
-**Settings › Spending** — session, today, all time, and the last few days, with
+**Settings › Spending:** session, today, all time, and the last few days, with
 token and request counts.
 
 History is kept for 90 days in `~/.lubv_studio/usage.json`. The session counter

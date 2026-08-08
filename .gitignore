@@ -1,0 +1,22 @@
+# build output
+build/
+dist/
+*.spec
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# local state (API keys, memory, checkpoints, usage)
+.lubv_studio/
+config.json
+*.bak
+
+# editors / os
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

@@ -96,7 +96,8 @@ python -m pytest -q
 </RUN_COMMAND>
 ```
 
-Runs in the project directory through PowerShell. Output is merged (stdout and
+Runs in the project directory through your platform's shell: PowerShell on
+Windows, zsh on macOS. Output is merged (stdout and
 stderr), truncated at 20,000 characters, and prefixed with the exit code so the
 agent can tell success from failure. Default timeout is 120 seconds, adjustable
 in Settings.
@@ -149,6 +150,9 @@ C:\Users\me\.ssh\id_rsa     absolute, outside the root
 ```
 
 Absolute paths that do land inside the project root are allowed.
+
+Shell commands the agent runs are also mirrored into the terminal panel, so
+you can read what happened without expanding the tool card.
 
 This applies to file operations. Shell commands are not sandboxed; they run with
 your user account's permissions, exactly as if you had typed them into a

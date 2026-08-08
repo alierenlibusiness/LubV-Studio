@@ -4,10 +4,13 @@
 
 ## 1. Install
 
-### Prebuilt executable
+### Prebuilt application
 
-Download `LUBV Studio.exe` from [Releases](../../releases) and double click it.
-No Python needed, nothing to configure, one file.
+Download the build for your platform from [Releases](../../releases).
+No Python needed, nothing to configure.
+
+- Windows: `LUBV Studio.exe`, a single file.
+- macOS: `LUBV Studio.app`, drag it into Applications.
 
 ### From source
 
@@ -18,7 +21,8 @@ pip install -r requirements.txt
 python -m lubv_studio
 ```
 
-Python 3.10 or newer. Windows, because the integrated terminal is PowerShell.
+Python 3.10 or newer, on Windows or macOS. On macOS use `./run.sh` instead of
+the commands above if you prefer a single step.
 
 ## 2. Get an API key
 
@@ -41,9 +45,9 @@ press **Test connection**. It confirms the key and shows your remaining balance.
 
 While you are there, pick a model:
 
-- **V4 Flash** — the default. Fast, cheap, 1M token context. Right for almost
+- **V4 Flash:** the default. Fast, cheap, 1M token context. Right for almost
   everything.
-- **V4 Pro** — noticeably stronger on hard architectural work. Roughly three
+- **V4 Pro:** noticeably stronger on hard architectural work. Roughly three
   times the price.
 
 ## 5. Write the brain
@@ -67,7 +71,7 @@ read main.py and add proper error handling to the file loading
 ```
 
 ```
-this crashes with "KeyError: config" — find out why and fix it
+this crashes with "KeyError: config", find out why and fix it
 ```
 
 ```

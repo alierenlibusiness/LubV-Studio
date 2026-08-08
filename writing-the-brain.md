@@ -14,14 +14,14 @@ extra layer of instructions between what you wrote and what the model receives.
 
 In order:
 
-1. **Your brain** — verbatim.
-2. **Response language** — one short block telling the model to answer in the
+1. **Your brain:** verbatim.
+2. **Response language:** one short block telling the model to answer in the
    interface language you selected.
-3. **Mode instructions** — only in Plan or Auto mode, describing that mode's
+3. **Mode instructions:** only in Plan or Auto mode, describing that mode's
    constraints.
-4. **Memory** — your saved notes, if memory is enabled.
-5. **Project context** — root path, OS, open editor tabs, and the file tree.
-6. **Tool protocol** — the tags and the rules for using them.
+4. **Memory:** your saved notes, if memory is enabled.
+5. **Project context:** root path, OS, open editor tabs, and the file tree.
+6. **Tool protocol:** the tags and the rules for using them.
 
 Items 2 through 6 are generated. Item 1 is yours.
 

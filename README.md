@@ -1,4 +1,4 @@
-# LUBV Studio — Documentation
+# LUBV Studio, Documentation
 
 > This is the `docs` branch. Long-form manual, kept separate from the source so
 > it can grow without adding noise to code diffs.
@@ -50,6 +50,9 @@ The Undo panel restores any of them with one click.
 
 **You always know the bill.** Token counts and USD cost are recorded per
 request and totalled per session, per day and all time.
+
+**Windows and macOS.** The shell, the fonts and the packaging adapt to the
+platform; everything else is identical.
 
 **Two interface languages.** Turkish and English. The agent replies in whichever
 one is selected, regardless of what language you type in.
