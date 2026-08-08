@@ -15,6 +15,11 @@ Your DeepSeek credit ran out. Top up; the key itself is fine.
 Rate limited. The agent now waits and retries this by itself, showing a note
 while it does. If it still fails after several attempts, wait a minute.
 
+**Errors come back in the wrong language**
+They should not any more: API errors and the agent's own notices follow the
+interface language like everything else. If you see a stray Turkish string in
+an English interface, that is a missing translation entry, worth reporting.
+
 **The balance in the top bar shows `--`**
 It could not be read. Hover it for the reason: usually no key entered yet, or
 no network. Click it to retry. It refreshes on a timer and again whenever a
@@ -78,12 +83,24 @@ instead, or copy the file in.
 
 **Terminal shows nothing**
 Some commands buffer their output until they exit, so a long-running process
-looks frozen and then flushes all at once. Press **Restart** to kill the shell
-and start a clean session.
+looks frozen and then flushes all at once. The header shows *running* while a
+command is in flight and reports its exit code and duration when it ends, so
+you can tell "still working" from "finished". **Stop** interrupts it, **Restart**
+kills the shell and starts a clean session.
 
 **A command is waiting for input**
 Interactive prompts are not supported in the embedded shell. Add the
 non-interactive flag (`-y`, `--yes`, `--no-input`) or run it in a real terminal.
+
+**The header says running but nothing is happening**
+A command spanning several lines (a here-string, a `foreach {` block) is
+consumed as one unit by the shell and the completion marker never comes back.
+Press **Stop**, then run it as a single line.
+
+**I cannot make the file panel wider**
+Fixed. If a build still refuses to move, it is an older one: the terminal path
+label and the welcome text used to claim so much width that the splitter had no
+room left to give.
 
 ## Git
 
@@ -117,7 +134,7 @@ Also the unpacking. Only the first launch after a reboot is slow.
 Everything the app remembers lives in `~/.lubv_studio/`:
 
 ```
-config.json      settings, prompt rules and API key
+config.json      settings, prompt rules, window layout and API key
 memory/          your notes
 sessions/        saved chats
 checkpoints/     previous versions of edited files

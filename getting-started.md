@@ -100,6 +100,16 @@ starts by itself.
 When it finishes, the status bar shows what the turn cost, and the balance in
 the top bar updates on its own.
 
+## Making the window yours
+
+Drag the splitter between the file panel and the editor to give the tree as
+much room as you want, drag the one above the terminal to resize it, and resize
+the window itself. All of it is remembered and comes back the next time you
+open the app.
+
+If you later unplug the monitor it was saved on, the app falls back to its
+default layout rather than opening somewhere you cannot see.
+
 ## Your chats are saved
 
 Every conversation is written to disk. The **Sessions** panel in the left rail

@@ -66,8 +66,12 @@ balance sits in the top bar and refreshes on its own.
 **Windows and macOS.** The shell, the fonts and the packaging adapt to the
 platform; everything else is identical.
 
-**Two interface languages.** Turkish and English. The agent replies in whichever
-one is selected, regardless of what language you type in.
+**Two interface languages.** Turkish and English, down to the error messages
+the agent and the API produce. The agent replies in whichever one is selected,
+regardless of what language you type in.
+
+**The window remembers itself.** Size, position and both splitter positions come
+back the way you left them.
 
 ## Design principles
 
