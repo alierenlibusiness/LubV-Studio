@@ -96,11 +96,16 @@ python -m pytest -q
 </RUN_COMMAND>
 ```
 
-Runs in the project directory through your platform's shell: PowerShell on
-Windows, zsh on macOS. Output is merged (stdout and
-stderr), truncated at 20,000 characters, and prefixed with the exit code so the
-agent can tell success from failure. Default timeout is 120 seconds, adjustable
-in Settings.
+Runs in the project directory through the same shell the terminal panel uses:
+PowerShell on Windows (PowerShell 7 if you have it), your login shell or zsh on
+macOS. Output is merged (stdout and stderr), truncated at 20,000 characters, and
+prefixed with the exit code so the agent can tell success from failure. Default
+timeout is 120 seconds, adjustable in Settings.
+
+One special case on Windows: PowerShell 5.1 cannot parse `&&` or `||`, and
+models write `cd app && npm install` constantly. Commands containing those
+operators are handed to `cmd.exe` instead, so they work whichever PowerShell you
+have. Everything else stays in PowerShell.
 
 ## Web
 
@@ -138,6 +143,29 @@ This project targets Python 3.10, do not use match statements.
 Writes a durable note that is injected into every future request. Visible and
 editable in the Memory panel.
 
+## Finishing
+
+```
+<TASK_DONE>
+```
+
+Not a tool: it is how the agent says the job is complete. It takes no argument,
+is stripped from what you see, and may be written on its own or as a matched
+pair.
+
+It exists because ending the loop on "the model produced no tool call" is
+wrong. A reply like *"now I will open that file and fix it"* contains no call,
+and the agent would stop with the work undone. So the rule is inverted: a turn
+with neither an action nor `TASK_DONE` is treated as unfinished, and the agent
+is told to continue.
+
+Two consequences worth knowing:
+
+- If the agent needs an answer from you before it can go on, it asks and writes
+  `TASK_DONE` in the same turn. The loop closes and the question reaches you.
+- If it keeps producing turns with neither, it is prompted a few times and then
+  the loop gives up rather than trading empty messages at your expense.
+
 ## The sandbox
 
 Every file path is resolved to an absolute path and then checked to be inside
@@ -167,6 +195,7 @@ before leaving Auto mode running on something you have not read.
 | Delete | Yes, with the file contents |
 | Run command | Yes, with the command |
 | Read, List, Search, Web, Memory | No |
+| Task done | Not an action, nothing to approve |
 
 Approval can be disabled per action type in Settings, or globally by switching
 to Auto mode. Plan mode blocks the mutating tools entirely, at the dispatcher,

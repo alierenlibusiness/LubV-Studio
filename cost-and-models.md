@@ -62,13 +62,33 @@ Neither should change how you work; they just explain the numbers.
 
 ## Where the meter is
 
+**Top bar:** your remaining API balance, plus what this session has spent. The
+balance is fetched in the background on a timer and again the moment a request
+finishes, so it reflects real spend without you refreshing anything. Click it to
+update immediately. It turns amber below one unit of currency.
+
 **Status bar:** session and today, always visible.
 
-**Settings › Spending:** session, today, all time, and the last few days, with
-token and request counts.
+**Settings › Spending:** remaining balance, then session, today, all time, and
+the last few days, with token and request counts.
 
 History is kept for 90 days in `~/.lubv_studio/usage.json`. The session counter
-resets on restart, or with the reset button.
+resets on restart, or with the reset button. The balance comes from DeepSeek
+directly and is not something the app can compute.
+
+## Steps and spend
+
+There is no step limit by default, which is what lets the agent finish a long
+job unattended. It also means a single request can run for many steps and cost
+proportionally more. Three things bound it:
+
+- **Stop** ends the run immediately, whatever it is doing.
+- The **no-progress guard** ends the loop by itself if the same action keeps
+  failing identically, so a stuck agent cannot spin in place on your credit.
+- **`Max agent steps`** in Settings sets a hard ceiling if you want one. `0`
+  means unlimited.
+
+The balance in the top bar is there precisely so a long run is never a surprise.
 
 ## Keeping the bill down
 
@@ -76,7 +96,10 @@ resets on restart, or with the reset button.
 - Prefer surgical edits. The agent already does; a brain rule reinforcing it
   helps on large files.
 - Start a new chat when you switch tasks. Old context is dead weight you pay to
-  carry.
+  carry, and the old one is saved in Sessions if you need it back.
 - Use Plan mode before large work. One planning turn is cheaper than three wrong
   implementation turns.
-- Lower `Max agent steps` if the agent over-verifies its own work.
+- Write a clear request the first time. The Prompt rules block in Settings
+  exists for this: a request that has to be clarified over three turns costs
+  three turns.
+- Set `Max agent steps` if you want a hard ceiling on any single request.

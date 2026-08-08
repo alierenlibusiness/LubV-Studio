@@ -85,11 +85,28 @@ commit everything with a sensible message and push it
 ## What you will see
 
 The agent works in visible steps. Each tool call becomes a card showing what it
-did, how long it took, and its output when you expand it. If you are in
-**Approve** mode, a dialog appears before any write with a line by line diff.
-If you are in **Auto** mode, it just goes.
+did and what came back (`412 lines`, `exit 0`), with the full output when you
+expand it. If you are in **Approve** mode, a dialog appears before any write
+with a line by line diff. If you are in **Auto** mode, it just goes.
 
-When it finishes, the status bar shows what the turn cost.
+It keeps going until the job is done. There is no step limit unless you set one,
+and it will not hand control back after announcing what it is about to do. Press
+**Stop** or `Esc` whenever you want to end a run.
+
+You do not have to wait, either. Type another message while it works and it gets
+folded into the same job; type one just as a job ends and it is queued and
+starts by itself.
+
+When it finishes, the status bar shows what the turn cost, and the balance in
+the top bar updates on its own.
+
+## Your chats are saved
+
+Every conversation is written to disk. The **Sessions** panel in the left rail
+lists them newest first, and you can search, reopen, rename and delete them.
+Reopening one brings back the whole conversation including the tool cards, and
+the agent picks up with that history. Starting a new chat saves the current one
+first, so nothing is lost.
 
 ## Next
 

@@ -19,11 +19,23 @@ In order:
    interface language you selected.
 3. **Mode instructions:** only in Plan or Auto mode, describing that mode's
    constraints.
-4. **Memory:** your saved notes, if memory is enabled.
-5. **Project context:** root path, OS, open editor tabs, and the file tree.
-6. **Tool protocol:** the tags and the rules for using them.
+4. **Persistence rule:** the instruction not to abandon a job half done and to
+   signal completion explicitly. Skipped in Plan mode, where nothing is applied.
+5. **Prompt rules:** your rules for how requests should be written, so the agent
+   can tell you what a vague request was missing. Editable in Settings, and
+   switchable off there.
+6. **Memory:** your saved notes, if memory is enabled.
+7. **Project context:** root path, OS, shell, open editor tabs, and the file tree.
+8. **Tool protocol:** the tags and the rules for using them.
 
-Items 2 through 6 are generated. Item 1 is yours.
+Items 2 through 8 are generated. Items 1 and 5 are yours.
+
+Two of the generated blocks exist to keep the agent working rather than to
+shape its character, and it is worth not fighting them from the brain. A rule
+like *"always stop and ask me before doing anything"* contradicts the
+persistence rule and produces an agent that stalls and then gets prompted to
+continue. If you want that behaviour, use **Approve** mode, which gates every
+action properly, instead of arguing for it in prose.
 
 ## What makes a brain work well
 
