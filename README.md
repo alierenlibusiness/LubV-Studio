@@ -35,9 +35,6 @@ Everything else is built so that agent can do real work: a full editor, a real
 shell, source control, web access, persistent memory, and a per request cost
 meter so you always know what you are spending.
 
-> The model provider's own policies still apply to API responses. What LUBV
-> removes is *our* layer, not DeepSeek's.
-
 ## Highlights
 
 | | |
