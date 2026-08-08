@@ -1,7 +1,7 @@
 """LUBV Studio'yu tek dosyalik bir .exe haline getirir.
 
 Kullanim:
-    python build_exe.py
+    python build_exe.py       (veya build.bat)
 
 Sonuc:  dist\\LUBV Studio.exe   (cift tiklayip calistirilir, Python gerekmez)
 """
@@ -22,11 +22,11 @@ def calistir(*komut: str) -> None:
     print(">", " ".join(komut))
     sonuc = subprocess.run(komut)
     if sonuc.returncode != 0:
-        sys.exit(f"Komut basarisiz: {' '.join(komut)}")
+        sys.exit(f"Command failed: {' '.join(komut)}")
 
 
 def main() -> None:
-    print(f"== {AD} derleniyor ==\n")
+    print(f"== Building {AD} ==\n")
 
     # 1) gerekli paketler
     try:
@@ -71,10 +71,10 @@ def main() -> None:
     exe = KOK / "dist" / f"{AD}.exe"
     if exe.exists():
         mb = exe.stat().st_size / 1024 / 1024
-        print(f"\nHAZIR:  {exe}   ({mb:.0f} MB)")
-        print("Bu dosyayi istedigin yere tasiyabilirsin, Python gerektirmez.")
+        print(f"\nDONE:  {exe}   ({mb:.0f} MB)")
+        print("Self-contained: move it anywhere, no Python required.")
     else:
-        sys.exit("exe olusturulamadi.")
+        sys.exit("Executable was not produced.")
 
 
 if __name__ == "__main__":
