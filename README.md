@@ -70,13 +70,13 @@ pip install -r requirements.txt
 python -m lubv_studio
 ```
 
-On Windows you can also double click `BASLAT.bat`, which installs the
+On Windows you can also double click `run.bat`, which installs the
 dependencies on first run and then launches the app.
 
 ### Build your own executable
 
 ```bash
-python build_exe.py     # or double click EXE_YAP.bat
+python build_exe.py     # or double click build.bat
 ```
 
 Output lands in `dist/LUBV Studio.exe` (~61 MB, self contained).
