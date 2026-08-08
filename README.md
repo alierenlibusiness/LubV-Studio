@@ -16,8 +16,8 @@ pip install -r requirements.txt
 python -m lubv_studio
 ```
 
-Requires Python 3.10+ (3.13 is what it is developed against) and Windows for
-the integrated PowerShell terminal. The rest of the codebase is portable.
+Requires Python 3.10+ (3.13 is what it is developed against). Runs on Windows
+and macOS; Linux works but gets less testing.
 
 Run against an arbitrary folder without touching your saved config:
 
@@ -50,6 +50,7 @@ lubv_studio/
 ├── icons.py          painter-path icon set
 ├── render.py         markdown to Qt rich text, syntax colouring, diffs
 ├── config.py         settings dataclass, mode and model catalogues
+├── platform_.py      every OS difference: shell, fonts, icon format
 └── i18n.py           translation table
 ```
 
@@ -115,6 +116,24 @@ Three things it guarantees before any commit or push:
 `github_adresi()` normalises `user/repo`, bare hostnames, full https URLs and
 ssh URLs into one canonical form; it returns an empty string for anything it
 does not recognise, which the caller treats as invalid input.
+
+## Platform differences
+
+`platform_.py` is the only module that reads `sys.platform`. Everything that
+differs by OS asks it:
+
+| Concern | Windows | macOS |
+|---|---|---|
+| Terminal shell | `powershell.exe -Command -` | `/bin/zsh` |
+| UI font | Segoe UI | SF Pro Text |
+| Monospace font | Cascadia Mono | SF Mono |
+| Window icon | `.ico` | `.icns` |
+| Packaging | one-file `.exe` | `.app` bundle |
+
+Two rules follow from this. Never write shell-specific syntax into a command
+string: resolve the condition in Python and emit plain commands. Never hardcode
+a font family: ask for the candidate list and take the first one the system
+actually has.
 
 ## Conventions
 
@@ -184,6 +203,8 @@ There is no test suite yet. Before promoting to `main`, verify:
 - [ ] `git status`, commit and push work from the source control panel
 - [ ] Publishing to a fresh GitHub repository works from an empty folder
 - [ ] Built executable launches with no Python on PATH
+- [ ] Tabs close from their own button after being reordered
+- [ ] Highlighting distinguishes builtins, literals and declarations
 
 ## Branches
 

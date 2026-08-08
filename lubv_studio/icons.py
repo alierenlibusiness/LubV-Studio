@@ -331,29 +331,147 @@ def ikon(ad: str, renk: str, boyut: int = 20) -> QIcon:
     return sonuc
 
 
-def uygulama_ikonu(boyut: int = 256) -> QPixmap:
-    """Pencere/gorev cubugu ikonu."""
-    from PySide6.QtGui import QBrush, QFont, QLinearGradient
+def uygulama_ikonu(boyut: int = 512) -> QPixmap:
+    """Uygulama ikonu: koyu yuvarlak kare uzerinde yesil komut isareti.
+
+    Harf yerine terminal chevron'u ve imleci kullaniliyor: 16 piksele
+    kucultuldugunde bile ne oldugu okunuyor ve gorev cubugunda diger
+    uygulamalarla karismiyor.
+    """
+    from PySide6.QtGui import QBrush, QLinearGradient, QRadialGradient
 
     pix = QPixmap(boyut, boyut)
     pix.fill(Qt.GlobalColor.transparent)
     b = QPainter(pix)
-    b.setRenderHint(QPainter.RenderHint.Antialiasing)
-    gecis = QLinearGradient(0, 0, boyut, boyut)
-    gecis.setColorAt(0.0, QColor("#53FC18"))
-    gecis.setColorAt(1.0, QColor("#00E701"))
-    b.setBrush(QBrush(gecis))
+    b.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+    o = boyut / 512.0          # 512'lik izgarada tasarlandi
+    kenar = 26 * o
+    govde = QRectF(kenar, kenar, boyut - 2 * kenar, boyut - 2 * kenar)
+    yaricap = 112 * o
+
+    # zemin: hafif dikey gecisli koyu yuzey
+    zemin = QLinearGradient(0, kenar, 0, boyut - kenar)
+    zemin.setColorAt(0.0, QColor("#1B2320"))
+    zemin.setColorAt(1.0, QColor("#0A0D0B"))
+    b.setBrush(QBrush(zemin))
     b.setPen(Qt.PenStyle.NoPen)
-    kenar = boyut * 0.07
-    b.drawRoundedRect(
-        QRectF(kenar, kenar, boyut - 2 * kenar, boyut - 2 * kenar),
-        boyut * 0.22, boyut * 0.22,
-    )
-    yazi = QFont("Segoe UI")
-    yazi.setBold(True)
-    yazi.setPixelSize(int(boyut * 0.54))
-    b.setFont(yazi)
-    b.setPen(QColor("#06140A"))
-    b.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "L")
+    b.drawRoundedRect(govde, yaricap, yaricap)
+
+    # ust kenarda ince isik, yuzey duz gorunmesin
+    isik = QPen(QColor(255, 255, 255, 26))
+    isik.setWidthF(3 * o)
+    b.setPen(isik)
+    b.setBrush(Qt.BrushStyle.NoBrush)
+    b.drawRoundedRect(govde.adjusted(1.5 * o, 1.5 * o, -1.5 * o, -1.5 * o), yaricap, yaricap)
+
+    # yesil parlama, isaretin arkasindan
+    parlama = QRadialGradient(boyut * 0.44, boyut * 0.52, boyut * 0.42)
+    parlama.setColorAt(0.0, QColor(83, 252, 24, 46))
+    parlama.setColorAt(1.0, QColor(83, 252, 24, 0))
+    b.setPen(Qt.PenStyle.NoPen)
+    b.setBrush(QBrush(parlama))
+    b.drawRoundedRect(govde, yaricap, yaricap)
+
+    # komut isareti
+    yesil = QLinearGradient(boyut * 0.2, boyut * 0.25, boyut * 0.8, boyut * 0.8)
+    yesil.setColorAt(0.0, QColor("#7BFF4A"))
+    yesil.setColorAt(1.0, QColor("#00E701"))
+    kalem = QPen(QBrush(yesil), 46 * o)
+    kalem.setCapStyle(Qt.PenCapStyle.RoundCap)
+    kalem.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    b.setPen(kalem)
+    b.setBrush(Qt.BrushStyle.NoBrush)
+
+    chevron = QPainterPath()
+    chevron.moveTo(168 * o, 176 * o)
+    chevron.lineTo(268 * o, 262 * o)
+    chevron.lineTo(168 * o, 348 * o)
+    b.drawPath(chevron)
+
+    # imlec cizgisi
+    b.drawLine(QPointF(300 * o, 348 * o), QPointF(368 * o, 348 * o))
+
     b.end()
     return pix
+
+
+def ikon_dosyalari_uret(klasor) -> list:
+    """png / ico / icns dosyalarini uretir. Derleme oncesi calistirilir."""
+    from pathlib import Path
+
+    klasor = Path(klasor)
+    klasor.mkdir(parents=True, exist_ok=True)
+    boyutlar = [16, 24, 32, 48, 64, 128, 256, 512, 1024]
+    kareler = {n: uygulama_ikonu(n) for n in boyutlar}
+
+    uretilen = []
+    png = klasor / "lubv.png"
+    kareler[512].save(str(png), "PNG")
+    uretilen.append(png)
+
+    ico = klasor / "lubv.ico"
+    if _ico_yaz(ico, [kareler[n] for n in (16, 24, 32, 48, 64, 128, 256)]):
+        uretilen.append(ico)
+
+    icns = klasor / "lubv.icns"
+    if _icns_yaz(icns, kareler):
+        uretilen.append(icns)
+    return uretilen
+
+
+def _png_baytlari(pix: QPixmap) -> bytes:
+    from PySide6.QtCore import QBuffer, QByteArray
+
+    ham = QByteArray()
+    tampon = QBuffer(ham)
+    tampon.open(QBuffer.OpenModeFlag.WriteOnly)
+    pix.save(tampon, "PNG")
+    tampon.close()
+    return bytes(ham)
+
+
+def _ico_yaz(yol, kareler: list) -> bool:
+    """Cok boyutlu ICO yazar (PNG gomulu, Vista ve sonrasi destekler)."""
+    import struct
+
+    try:
+        girdiler = [(k, _png_baytlari(k)) for k in kareler]
+        basliklar = struct.pack("<HHH", 0, 1, len(girdiler))
+        govde = b""
+        ofset = 6 + 16 * len(girdiler)
+        for pix, veri in girdiler:
+            genislik = 0 if pix.width() >= 256 else pix.width()
+            yukseklik = 0 if pix.height() >= 256 else pix.height()
+            basliklar += struct.pack(
+                "<BBBBHHII", genislik, yukseklik, 0, 0, 1, 32, len(veri), ofset
+            )
+            govde += veri
+            ofset += len(veri)
+        yol.write_bytes(basliklar + govde)
+        return True
+    except Exception:
+        return False
+
+
+def _icns_yaz(yol, kareler: dict) -> bool:
+    """macOS .icns dosyasi yazar (PNG tabanli turler)."""
+    import struct
+
+    turler = {
+        b"icp4": 16, b"icp5": 32, b"icp6": 64,
+        b"ic07": 128, b"ic08": 256, b"ic09": 512,
+        b"ic11": 32, b"ic12": 64, b"ic13": 256, b"ic14": 512,
+    }
+    try:
+        parcalar = b""
+        for tur, boyut in turler.items():
+            pix = kareler.get(boyut)
+            if pix is None:
+                continue
+            veri = _png_baytlari(pix)
+            parcalar += tur + struct.pack(">I", len(veri) + 8) + veri
+        yol.write_bytes(b"icns" + struct.pack(">I", len(parcalar) + 8) + parcalar)
+        return True
+    except Exception:
+        return False

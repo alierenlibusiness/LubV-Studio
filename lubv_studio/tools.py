@@ -81,7 +81,7 @@ aranacak metin
 klasor/dosya.py
 </FILE_DELETE>
 
-7) Terminal komutu calistir (proje klasorunde, Windows):
+7) Terminal komutu calistir (proje klasorunde, kullanicinin kabugunda):
 <RUN_COMMAND>
 python -V
 </RUN_COMMAND>

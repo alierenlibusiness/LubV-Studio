@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
 
+from . import platform_
+
 C = {
     # zeminler: gercek siyahtan gri tonlarina
     "bg0": "#0A0A0B",     # ana tuval
@@ -58,8 +60,10 @@ GRADYAN_HOVER = (
     "stop:0 #6FFF3E, stop:1 #15F51A)"
 )
 
-UI_FONT = "Segoe UI"
-CODE_FONT = "Cascadia Mono, Consolas, monospace"
+# Yazi tipleri platforma gore secilir: Windows'ta Segoe UI / Cascadia,
+# macOS'ta SF Pro / SF Mono. Liste QSS'e sirayla verilir, ilk bulunan kullanilir.
+UI_FONT = platform_.ui_yazi_tipleri()[0]
+CODE_FONT = ", ".join(f'"{ad}"' for ad in platform_.kod_yazi_tipleri()) + ", monospace"
 
 # olculer: her yerde ayni degerler kullanilir
 R_KUCUK = 6
@@ -104,7 +108,7 @@ def qss() -> str:
     return f"""
 /* ============ temel ============ */
 QWidget {{
-    font-family: "{UI_FONT}", sans-serif;
+    font-family: "{UI_FONT}", "Helvetica Neue", sans-serif;
     font-size: 13px;
     color: {C['text']};
     background: transparent;
@@ -468,7 +472,13 @@ QTabBar::tab:selected {{
     border-top: 2px solid {C['accent']};
 }}
 QTabBar::tab:hover:!selected {{ background: {C['bg3']}; color: {C['text2']}; }}
-QTabBar::close-button {{ image: none; subcontrol-position: right; }}
+QToolButton#TabClose {{
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    margin-left: 2px;
+}}
+QToolButton#TabClose:hover {{ background: {C['bg4']}; }}
 
 /* ============ diyalog ============ */
 QMessageBox {{ background: {C['bg1']}; }}
