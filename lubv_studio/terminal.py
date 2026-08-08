@@ -1,4 +1,8 @@
-"""Dahili terminal (kalici PowerShell oturumu) ve Git paneli."""
+"""Dahili terminal (kalici kabuk oturumu) ve Git paneli.
+
+Kabuk platforma gore secilir: Windows'ta PowerShell, macOS'ta zsh,
+Linux'ta bash. Bkz. platform_.kabuk().
+"""
 
 from __future__ import annotations
 
@@ -26,7 +30,7 @@ def _mono(size: int = 12) -> QFont:
 
 
 class Terminal(QFrame):
-    """Proje klasorunde acilan, durumunu koruyan PowerShell oturumu."""
+    """Proje klasorunde acilan, durumunu koruyan kabuk oturumu."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -123,10 +127,15 @@ class Terminal(QFrame):
         program, argumanlar, _ = platform_.kabuk()
         self.proc.start(program, argumanlar)
         if self.proc.waitForStarted(4000):
-            self._yaz(t("PowerShell oturumu açıldı") + f"  ·  {self.cwd}\n", C["muted"])
-            self.calistir("$ProgressPreference='SilentlyContinue'", sessiz=True)
+            self._yaz(
+                f"{platform_.kabuk_adi()} {t('oturumu açıldı')}  ·  {self.cwd}\n",
+                C["muted"],
+            )
+            if platform_.WINDOWS:
+                # PowerShell'in ilerleme cubuklari ciktiyi kirletiyor
+                self.calistir("$ProgressPreference='SilentlyContinue'", sessiz=True)
         else:
-            self._yaz(t("PowerShell başlatılamadı.") + "\n", C["red"])
+            self._yaz(t("Kabuk başlatılamadı.") + "\n", C["red"])
 
     def _kabugu_kapat(self) -> None:
         if self.proc is not None:
