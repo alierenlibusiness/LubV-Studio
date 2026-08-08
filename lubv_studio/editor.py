@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt, Signal
@@ -10,11 +11,10 @@ from PySide6.QtGui import (
     QTextFormat, QTextOption,
 )
 from PySide6.QtWidgets import (
-    QFrame, QLabel, QPlainTextEdit, QTabBar, QTabWidget, QTextEdit,
+    QFrame, QLabel, QMessageBox, QPlainTextEdit, QTabBar, QTabWidget, QTextEdit,
     QToolButton, QVBoxLayout, QWidget,
 )
 
-from .i18n import t
 from . import platform_
 from .i18n import t
 from .icons import ikon
@@ -393,13 +393,167 @@ class CodeEditor(QPlainTextEdit):
     # -- klavye --
 
     def keyPressEvent(self, event):  # noqa: N802
-        if event.key() == Qt.Key.Key_S and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        tus = event.key()
+
+        if tus == Qt.Key.Key_S and ctrl:
             self.kaydet_istendi.emit()
             return
-        if event.key() == Qt.Key.Key_Tab and not event.modifiers():
-            self.insertPlainText("    ")
+
+        if tus == Qt.Key.Key_Tab and not event.modifiers():
+            if self.textCursor().hasSelection():
+                self._blok_kaydir(1)
+            else:
+                self.insertPlainText("    ")
             return
+
+        if tus == Qt.Key.Key_Backtab or (tus == Qt.Key.Key_Tab and shift):
+            self._blok_kaydir(-1)
+            return
+
+        if tus in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers():
+            self._akilli_satir_basi()
+            return
+
         super().keyPressEvent(event)
+
+    # -- girinti yardimcilari --
+
+    def _akilli_satir_basi(self) -> None:
+        """Yeni satir onceki satirin girintisini korur, blok acilisinda artirir."""
+        imlec = self.textCursor()
+        satir = imlec.block().text()
+        onek = re.match(r"[ \t]*", satir).group(0)
+        sol = satir[: imlec.positionInBlock()].rstrip()
+        if sol.endswith((":", "{", "(", "[")):
+            onek += "    "
+        imlec.insertText("\n" + onek)
+        self.setTextCursor(imlec)
+        self.ensureCursorVisible()
+
+    def _blok_kaydir(self, yon: int) -> None:
+        """Secili satirlari topluca iceri veya disari alir."""
+        imlec = self.textCursor()
+        bas, son = sorted((imlec.selectionStart(), imlec.selectionEnd()))
+        belge = self.document()
+        ilk = belge.findBlock(bas).blockNumber()
+        # secim tam satir basinda bitiyorsa o satiri kapsama alma
+        bitis_blok = belge.findBlock(son)
+        sonuncu = bitis_blok.blockNumber()
+        if son == bitis_blok.position() and sonuncu > ilk:
+            sonuncu -= 1
+
+        imlec.beginEditBlock()
+        for no in range(ilk, sonuncu + 1):
+            blok = belge.findBlockByNumber(no)
+            duzenle = QTextCursor(blok)
+            if yon > 0:
+                duzenle.insertText("    ")
+                continue
+            metin = blok.text()
+            silinecek = len(metin) - len(metin.lstrip(" "))
+            silinecek = min(4, silinecek)
+            if metin.startswith("\t"):
+                silinecek = 1
+            for _ in range(silinecek):
+                duzenle.deleteChar()
+        imlec.endEditBlock()
+
+        yeni = self.textCursor()
+        yeni.setPosition(belge.findBlockByNumber(ilk).position())
+        son_blok = belge.findBlockByNumber(sonuncu)
+        yeni.setPosition(
+            son_blok.position() + len(son_blok.text()), QTextCursor.MoveMode.KeepAnchor
+        )
+        self.setTextCursor(yeni)
+
+
+class TabCloseButton(QToolButton):
+    """Sekme kapatma dugmesi.
+
+    VS Code'daki davranis: dosya kaydedilmemisse carpi yerine dolu bir nokta
+    gorunur, farenin altina girince tekrar carpiya doner. Boylece kaydedilmemis
+    dosya bir bakista belli olur ve carpi da hep ayni yerde durur.
+    """
+
+    OLCU = 18
+    SIMGE = 11
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("TabClose")
+        self.setFixedSize(QSize(self.OLCU, self.OLCU))
+        self.setIconSize(QSize(self.SIMGE, self.SIMGE))
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(t("Sekmeyi kapat"))
+        self.setAutoRaise(True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._kirli = False
+        self._uzerinde = False
+        self._simgeyi_tazele()
+
+    def kirli_ayarla(self, kirli: bool) -> None:
+        if kirli != self._kirli:
+            self._kirli = kirli
+            self._simgeyi_tazele()
+
+    def _simgeyi_tazele(self) -> None:
+        if self._kirli and not self._uzerinde:
+            self.setIcon(_kirli_nokta(C["accent"], self.SIMGE))
+            self.setToolTip(t("Kaydedilmemiş değişiklik var"))
+            return
+        renk = C["text"] if self._uzerinde else C["muted"]
+        self.setIcon(ikon("capraz", renk, self.SIMGE))
+        self.setToolTip(t("Sekmeyi kapat"))
+
+    def enterEvent(self, event):  # noqa: N802
+        self._uzerinde = True
+        self._simgeyi_tazele()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):  # noqa: N802
+        self._uzerinde = False
+        self._simgeyi_tazele()
+        super().leaveEvent(event)
+
+
+def _kirli_nokta(renk: str, boyut: int):
+    """Kaydedilmemis dosya isareti: dolu daire."""
+    from PySide6.QtGui import QIcon, QPixmap
+
+    pix = QPixmap(boyut * 3, boyut * 3)
+    pix.fill(Qt.GlobalColor.transparent)
+    boyaci = QPainter(pix)
+    boyaci.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    boyaci.setBrush(QColor(renk))
+    boyaci.setPen(Qt.PenStyle.NoPen)
+    kenar = boyut * 3 * 0.28
+    boyaci.drawEllipse(
+        QRect(int(kenar), int(kenar), int(boyut * 3 - 2 * kenar), int(boyut * 3 - 2 * kenar))
+    )
+    boyaci.end()
+    return QIcon(
+        pix.scaled(
+            boyut, boyut,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    )
+
+
+class _SekmeSeridi(QTabBar):
+    """Orta tus ile sekme kapatmayi ekler."""
+
+    orta_tikla_kapat = Signal(int)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802
+        if event.button() == Qt.MouseButton.MiddleButton:
+            indeks = self.tabAt(event.position().toPoint())
+            if indeks >= 0:
+                self.orta_tikla_kapat.emit(indeks)
+                return
+        super().mouseReleaseEvent(event)
 
 
 class EditorTabs(QTabWidget):
@@ -411,9 +565,14 @@ class EditorTabs(QTabWidget):
     def __init__(self, parent=None, font_size: int = 13) -> None:
         super().__init__(parent)
         self.font_size = font_size
+        serit = _SekmeSeridi(self)
+        serit.orta_tikla_kapat.connect(self.sekme_kapat)
+        self.setTabBar(serit)
         self.setTabsClosable(False)   # kapatma dugmesini kendimiz koyuyoruz
         self.setMovable(True)
         self.setDocumentMode(True)
+        self.setElideMode(Qt.TextElideMode.ElideRight)
+        self.tabBar().setUsesScrollButtons(True)
         self.tabCloseRequested.connect(self.sekme_kapat)
         self.currentChanged.connect(lambda _: self.durum_degisti.emit())
         self.acik: dict[str, CodeEditor] = {}   # mutlak yol -> editor
@@ -467,14 +626,7 @@ class EditorTabs(QTabWidget):
 
     def _kapat_dugmesi_ekle(self, index: int) -> None:
         """Sekmenin sagina kendi cizdigimiz kapatma dugmesini koyar."""
-        dugme = QToolButton()
-        dugme.setObjectName("TabClose")
-        dugme.setFixedSize(QSize(16, 16))
-        dugme.setIconSize(QSize(10, 10))
-        dugme.setIcon(ikon("capraz", C["muted"], 10))
-        dugme.setCursor(Qt.CursorShape.PointingHandCursor)
-        dugme.setToolTip(t("Sekmeyi kapat"))
-        dugme.setAutoRaise(True)
+        dugme = TabCloseButton()
         dugme.clicked.connect(lambda: self._dugmeden_kapat(dugme))
         self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, dugme)
 
@@ -489,8 +641,13 @@ class EditorTabs(QTabWidget):
         idx = self.indexOf(editor)
         if idx < 0:
             return
-        ad = Path(editor.dosya_yolu).name
-        self.setTabText(idx, f"● {ad}" if editor.document().isModified() else ad)
+        kirli = editor.document().isModified()
+        # Baslikta "●" varken sekme genisligi surekli degisiyor ve carpi
+        # yerinden oynuyordu. Kirli isareti artik kapatma dugmesinin kendisi.
+        self.setTabText(idx, Path(editor.dosya_yolu).name)
+        dugme = self.tabBar().tabButton(idx, QTabBar.ButtonPosition.RightSide)
+        if isinstance(dugme, TabCloseButton):
+            dugme.kirli_ayarla(kirli)
         self.durum_degisti.emit()
 
     def aktifi_kaydet(self) -> bool:
@@ -518,16 +675,33 @@ class EditorTabs(QTabWidget):
                 adet += 1
         return adet
 
-    def sekme_kapat(self, index: int) -> None:
+    def sekme_kapat(self, index: int, sor: bool = True) -> None:
         widget = self.widget(index)
         if isinstance(widget, CodeEditor):
+            if sor and widget.document().isModified():
+                cevap = QMessageBox.question(
+                    self, t("Kaydedilmemiş değişiklikler"),
+                    Path(widget.dosya_yolu).name + t(" kaydedilsin mi?"),
+                    QMessageBox.StandardButton.Save
+                    | QMessageBox.StandardButton.Discard
+                    | QMessageBox.StandardButton.Cancel,
+                )
+                if cevap == QMessageBox.StandardButton.Cancel:
+                    return
+                if cevap == QMessageBox.StandardButton.Save and not self.kaydet(widget):
+                    return   # kaydedilemedi, sekmeyi kapatip veriyi kaybetme
             self.acik.pop(widget.dosya_yolu, None)
         self.removeTab(index)
+        if isinstance(widget, CodeEditor):
+            widget.deleteLater()
         self.durum_degisti.emit()
 
-    def hepsini_kapat(self) -> None:
+    def hepsini_kapat(self, sor: bool = False) -> None:
         while self.count():
-            self.sekme_kapat(0)
+            onceki = self.count()
+            self.sekme_kapat(0, sor=sor)
+            if self.count() == onceki:
+                return   # kullanici vazgecti
 
     def diskten_tazele(self, yol: str) -> None:
         """Ajan dosyayi degistirdiginde acik sekmeyi gunceller."""
@@ -596,8 +770,9 @@ class WelcomeView(QFrame):
         alt.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         ipuclari = QLabel(
-            "Soldan bir dosya sec ve ac  ·  Sagdaki sohbetten LUBV'ye ne isteyecegini yaz\n"
-            "Ctrl+S kaydeder  ·  Ctrl+` terminali acar  ·  Ctrl+B dosya panelini gizler"
+            t("Soldan bir dosya seç ve aç  ·  Sağdaki sohbete ne istediğini yaz")
+            + "\n"
+            + t("Ctrl+S kaydeder  ·  Ctrl+J terminali açar  ·  Ctrl+B dosya panelini gizler")
         )
         ipuclari.setStyleSheet(f"color:{C['line2']}; font-size:12px;")
         ipuclari.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -14,7 +14,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import web
+from . import platform_, web
+from .i18n import t
 
 # Modele gonderilen agac/aramada atlanan klasorler (token israfini onler)
 IGNORED_DIRS = {
@@ -101,6 +102,10 @@ https://docs.python.org/3/library/asyncio-task.html
 hatirlanacak tek cumlelik not
 </MEMORY_ADD>
 
+11) Isin TAMAMEN bittigini bildir (bunu yazmadigin surece dongu devam eder):
+<TASK_DONE>
+</TASK_DONE>
+
 KURALLAR
 - Yollar proje kokune goredir. Mutlak yol (C:\\...) veya .. kullanma.
 - Bir dosyayi degistirmeden once MUTLAKA oku. Tahminle kod yazma.
@@ -109,7 +114,8 @@ KURALLAR
 - FILE_EDIT'te ESKI blogu dosyadaki metinle birebir ayni olmali (bosluklar dahil).
 - Bir turda birden fazla arac cagirabilirsin, sirayla calistirilirlar.
 - Bilmedigin veya emin olmadigin kutuphane/surum/hata icin once WEB_SEARCH yap.
-- Is bittiginde etiketsiz, kisa bir ozet yaz: ne yaptin, sirada ne var.
+- "Simdi sunu yapacagim" deyip durma; ayni cevapta etiketi de yaz.
+- Is bittiginde kisa bir ozet yaz ve sonuna <TASK_DONE> ekle.
 """
 
 TOOL_LABELS = {
@@ -154,6 +160,8 @@ class ToolCall:
     duration: float = 0.0
     approved: bool | None = None
     checkpoint_id: str = ""
+    # kartta gosterilen kisa sonuc ozeti: "412 satir", "7 sonuc", "cikis 0"
+    ozet: str = ""
 
     @property
     def label(self) -> str:
@@ -182,11 +190,14 @@ class ToolCall:
 TAG_NAMES = [
     "FILE_READ", "FILE_WRITE", "FILE_EDIT", "FILE_LIST", "FILE_SEARCH",
     "FILE_DELETE", "RUN_COMMAND", "WEB_SEARCH", "WEB_FETCH", "MEMORY_ADD",
+    "TASK_DONE",
 ]
 _TAG_RE = re.compile(
     r"<(" + "|".join(TAG_NAMES) + r")>(.*?)</\1>",
     re.DOTALL | re.IGNORECASE,
 )
+# TASK_DONE bazen govdesiz, tek etiket olarak yazilir; onu da yakala
+_BITIS_RE = re.compile(r"<\s*TASK_DONE\s*/?\s*>", re.IGNORECASE)
 _KIND_BY_TAG = {
     "FILE_READ": "read",
     "FILE_WRITE": "write",
@@ -198,6 +209,7 @@ _KIND_BY_TAG = {
     "WEB_SEARCH": "websearch",
     "WEB_FETCH": "webfetch",
     "MEMORY_ADD": "memory",
+    "TASK_DONE": "done",
 }
 _EDIT_SPLIT_RE = re.compile(
     r"^\s*(?P<path>[^\n]+)\n\s*-{2,}\s*ESKI\s*-{2,}\s*\n(?P<old>.*?)\n?\s*-{2,}\s*YENI\s*-{2,}\s*\n(?P<new>.*)$",
@@ -227,6 +239,9 @@ def parse_tool_calls(text: str) -> list[ToolCall]:
         kind = _KIND_BY_TAG[match.group(1).upper()]
         body = match.group(2)
 
+        if kind == "done":
+            continue  # bitis bildirimi bir arac degil, dongu kontrolu
+
         if kind == "write":
             head, sep, content = body.partition("---")
             if not sep:
@@ -255,8 +270,14 @@ def parse_tool_calls(text: str) -> list[ToolCall]:
 
 def strip_tool_calls(text: str) -> str:
     cleaned = _TAG_RE.sub("", text or "")
+    cleaned = _BITIS_RE.sub("", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def gorev_bitti_mi(text: str) -> bool:
+    """Model isin tamamen bittigini bildirdi mi?"""
+    return bool(_BITIS_RE.search(text or ""))
 
 
 # --------------------------------------------------------------------------
@@ -498,21 +519,37 @@ class Workspace:
     # -- komut --
 
     def run_command(self, command: str, timeout: int = 60) -> tuple[bool, str]:
+        """Komutu kullanicinin kabugunda, proje klasorunde calistirir.
+
+        Eskiden shell=True kullaniliyordu; Windows'ta bu cmd.exe demek oluyor ve
+        model PowerShell sozdizimi yazdiginda komut sessizce hata veriyordu.
+        Artik terminal panelindeki kabugun aynisi kullaniliyor.
+        """
         if self.root is None:
             return False, "Proje klasoru yok."
+        ortam = dict(os.environ)
+        ortam.setdefault("PYTHONIOENCODING", "utf-8")
+        ortam["GIT_PAGER"] = "cat"
+        ortam["PAGER"] = "cat"
         try:
             proc = subprocess.run(
-                command,
-                shell=True,
+                platform_.komut_argumanlari(command),
                 cwd=str(self.root),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout,
+                env=ortam,
+                creationflags=platform_.GIZLI_PENCERE,
             )
         except subprocess.TimeoutExpired:
-            return False, f"Komut {timeout} saniyede bitmedi, iptal edildi."
+            return False, (
+                f"Komut {timeout} saniyede bitmedi, iptal edildi. Uzun suren isler "
+                "icin komutu arka plana al veya Ayarlar'dan zaman asimini artir."
+            )
+        except FileNotFoundError:
+            return False, "Kabuk bulunamadi, komut calistirilamadi."
         except Exception as exc:
             return False, f"Calistirilamadi: {exc}"
         cikti = ((proc.stdout or "") + (proc.stderr or "")).strip() or "(cikti yok)"
@@ -524,6 +561,59 @@ class Workspace:
 # --------------------------------------------------------------------------
 # Calistirici
 # --------------------------------------------------------------------------
+
+def _satir_sayisi(metin: str) -> int:
+    return len((metin or "").splitlines())
+
+
+def sonuc_ozeti(call: ToolCall) -> str:
+    """Arac kartinda gosterilecek kisa sonuc.
+
+    Okuma ve listeleme milisaniyeler surdugu icin sure rozetinde "0.0s" yaziyor
+    ve is yapilmamis gibi gorunuyordu. Onun yerine gercekten ne oldugu yazilir.
+    """
+    cikti = call.output or ""
+    if not call.ok:
+        return t("hata")
+
+    if call.kind == "read":
+        satir = _satir_sayisi(cikti)
+        return f"{satir} {t('satır')}" if satir else t("boş dosya")
+    if call.kind == "list":
+        adet = len([s for s in cikti.splitlines() if s.strip()])
+        return f"{adet} {t('öğe')}"
+    if call.kind == "search":
+        satirlar = [s for s in cikti.splitlines() if s.strip()]
+        if len(satirlar) == 1 and satirlar[0].endswith("icin sonuc yok."):
+            return t("sonuç yok")
+        return f"{len(satirlar)} {t('eşleşme')}"
+    if call.kind == "run":
+        ilk = cikti.splitlines()[0] if cikti else ""
+        kod = re.search(r"cikis kodu (-?\d+)", ilk)
+        return f"{t('çıkış')} {kod.group(1)}" if kod else t("çalıştı")
+    if call.kind in ("write", "edit"):
+        sayilar = re.findall(r"(\d+) satir", cikti)
+        return f"{sayilar[-1]} {t('satır')}" if sayilar else t("yazıldı")
+    if call.kind == "delete":
+        return t("silindi")
+    if call.kind == "websearch":
+        adet = re.search(r"(\d+) sonuc", cikti)
+        return f"{adet.group(1)} {t('sonuç')}" if adet else t("arandı")
+    if call.kind == "webfetch":
+        return f"{len(cikti)} {t('karakter')}"
+    if call.kind == "memory":
+        return t("kaydedildi")
+    return ""
+
+
+def sure_metni(saniye: float) -> str:
+    """Cok kisa sureleri milisaniye olarak yazar; 0.0s yaniltici oluyordu."""
+    if saniye < 1.0:
+        return f"{int(saniye * 1000)} ms"
+    if saniye < 60:
+        return f"{saniye:.1f} s"
+    return f"{int(saniye // 60)} {t('dk')} {int(saniye % 60)} s"
+
 
 def execute(call: ToolCall, workspace: Workspace, memory=None, timeout: int = 60) -> ToolCall:
     basla = time.time()
@@ -559,6 +649,7 @@ def execute(call: ToolCall, workspace: Workspace, memory=None, timeout: int = 60
     except Exception as exc:
         call.ok, call.output = False, f"Beklenmeyen hata: {exc}"
     call.duration = time.time() - basla
+    call.ozet = sonuc_ozeti(call)
     return call
 
 

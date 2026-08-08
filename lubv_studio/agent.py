@@ -15,7 +15,9 @@ from PySide6.QtCore import QObject, QThread, Signal
 from . import platform_, tools
 from .api import ApiError, DeepSeekClient
 from .config import (
-    CEVAP_DILI, CHAT_KIPI_TALIMATI, OTO_MODU_TALIMATI, PLAN_MODU_TALIMATI,
+    ARA_MESAJ_BASLIGI, CEVAP_DILI, CHAT_KIPI_TALIMATI, DEVAM_DURTUSU,
+    OTO_MODU_TALIMATI, PLAN_MODU_TALIMATI, PROMPT_KURALLARI_TALIMATI,
+    SURDURME_TALIMATI,
 )
 from .memory import MemoryStore
 from .tools import ToolCall, Workspace
@@ -23,7 +25,29 @@ from .usage import Kullanim
 
 MAX_RESULT_CHARS = 14000
 
-OPEN_TAGS = [f"<{ad}>" for ad in tools.TAG_NAMES]
+# Model arac cagirmadan ve <TASK_DONE> yazmadan durursa bu kadar kez durtulur.
+# Sonrasinda dongu kapanir; yoksa iki taraf da bos bos konusup para yakar.
+MAX_DURTU = 3
+
+# Tur sayisi sinirsiz oldugu icin tek gercek tehlike, ilerlemeyen bir dongude
+# takilip kalmak: ornegin FILE_EDIT'in ESKI blogu hic tutmuyor ve model ayni
+# duzenlemeyi tekrar tekrar deniyor. Ayni basarisiz arac kumesi ust uste bu
+# kadar tekrarlarsa dongu kesilir. Ilerleme oldugu surece sinir yoktur.
+MAX_KISIR_TUR = 4
+
+# Gecici API hatalarinda (429, 500, 503, kopan baglanti) tekrar deneme
+YENIDEN_DENEME = 4
+BEKLEME_SANIYE = [2, 5, 12, 25]
+
+# TASK_DONE bir arac degil, dongu kontrolu. Govdesi olmadan da yazilabildigi
+# icin "ac ve kapaniana kadar yut" mantigina sokulamaz: kapanis etiketi hic
+# gelmezse cevabin geri kalani ekrana hic dusmezdi. Bunun yerine tek tek
+# token olarak ayiklanir.
+OPEN_TAGS = [f"<{ad}>" for ad in tools.TAG_NAMES if ad != "TASK_DONE"]
+SESSIZ_TOKENLER = ["<TASK_DONE/>", "<TASK_DONE />", "<TASK_DONE>", "</TASK_DONE>"]
+
+# Yarim gelmis bir etiketi beklerken tamponda tutulacak en fazla karakter
+_EN_UZUN_ETIKET = max(len(t) for t in OPEN_TAGS + SESSIZ_TOKENLER) + 1
 
 
 class StreamTagFilter:
@@ -55,13 +79,21 @@ class StreamTagFilter:
             self.buf = self.buf[idx:]
             ust = self.buf.upper()
 
+            # bitis bildirimi: sadece token atilir, metin akmaya devam eder
+            sessiz = next((s for s in SESSIZ_TOKENLER if ust.startswith(s)), None)
+            if sessiz:
+                self.buf = self.buf[len(sessiz):]
+                continue
+
             eslesen = next((t for t in OPEN_TAGS if ust.startswith(t)), None)
             if eslesen:
                 self.buf = self.buf[len(eslesen):]
                 self.inside = "</" + eslesen[1:]
                 continue
 
-            if len(self.buf) < 16 and any(t.startswith(ust) for t in OPEN_TAGS):
+            if len(self.buf) < _EN_UZUN_ETIKET and any(
+                t.startswith(ust) for t in OPEN_TAGS + SESSIZ_TOKENLER
+            ):
                 return "".join(out)  # etiketin devami gelsin
 
             out.append(self.buf[0])
@@ -72,6 +104,22 @@ class StreamTagFilter:
         self.buf = ""
         self.inside = None
         return kalan
+
+
+# Bunlar gecicidir: bekleyip tekrar denemek ise yarar. Anahtar hatasi veya
+# bakiye bitmesi gibi kalici hatalarda tekrar denemek sadece zaman kaybi.
+_GECICI_IZLER = (
+    "429", "500", "502", "503", "504",
+    "baglanti", "bağlantı", "zaman asimi", "timeout", "akis kesildi",
+    "connection", "temporarily", "overload",
+)
+
+
+def _gecici_hata(exc: Exception) -> bool:
+    metin = str(exc).lower()
+    if "401" in metin or "402" in metin or "403" in metin:
+        return False
+    return any(iz in metin for iz in _GECICI_IZLER)
 
 
 def build_system_prompt(
@@ -85,6 +133,11 @@ def build_system_prompt(
     # Chat kipi: arac protokolu ve proje baglami hic gonderilmez
     if cfg.kip == "chat":
         parcalar.append(CHAT_KIPI_TALIMATI.strip())
+        if getattr(cfg, "use_prompt_rules", True):
+            kalip = PROMPT_KURALLARI_TALIMATI.get(
+                cfg.language, PROMPT_KURALLARI_TALIMATI["tr"]
+            )
+            parcalar.append(kalip.format(kurallar=cfg.etkin_prompt_kurallari).strip())
         bellek_metni = memory.as_prompt_block() if (memory and cfg.use_memory) else ""
         if bellek_metni:
             parcalar.append(bellek_metni)
@@ -94,6 +147,16 @@ def build_system_prompt(
         parcalar.append(PLAN_MODU_TALIMATI.strip())
     elif cfg.mode == "oto":
         parcalar.append(OTO_MODU_TALIMATI.strip())
+
+    # plan modunda zaten hicbir sey uygulanmaz, surdurme talimati anlamsiz olur
+    if cfg.mode != "plan":
+        parcalar.append(SURDURME_TALIMATI.strip())
+
+    if getattr(cfg, "use_prompt_rules", True):
+        kalip = PROMPT_KURALLARI_TALIMATI.get(
+            cfg.language, PROMPT_KURALLARI_TALIMATI["tr"]
+        )
+        parcalar.append(kalip.format(kurallar=cfg.etkin_prompt_kurallari).strip())
 
     bellek = memory.as_prompt_block() if (memory and cfg.use_memory) else ""
     if bellek:
@@ -133,6 +196,8 @@ class AgentWorker(QThread):
     # sonuc
     usage_reported = Signal(object)   # Kullanim
     failed = Signal(str)
+    uyari = Signal(str)               # olumcul olmayan bilgi (yeniden deneme vb.)
+    mesaj_alindi = Signal(str)        # calisirken eklenen mesaj isleme girdi
     done = Signal(list)   # gecmise eklenecek mesajlar
 
     def __init__(
@@ -157,12 +222,48 @@ class AgentWorker(QThread):
         self._approval_result = False
         self._yeni_mesajlar: list[dict] = []
 
+        # calisirken kullanicidan gelen ek mesajlar
+        self._kilit = threading.Lock()
+        self._bekleyen: list[str] = []
+        self._kapandi = False
+
     # ---------- disaridan kontrol ----------
 
     def cancel(self) -> None:
         self.cancel_event.set()
         self._approval_result = False
         self._approval_event.set()
+
+    def mesaj_ekle(self, metin: str) -> bool:
+        """Ajan calisirken gelen mesaji sonraki tura ekler.
+
+        Dongu kapandiysa False doner; o zaman arayuz mesaji kendi kuyruguna
+        alip yeni bir kosu baslatir. Boylece hicbir mesaj kaybolmaz.
+        """
+        metin = (metin or "").strip()
+        if not metin:
+            return False
+        with self._kilit:
+            if self._kapandi:
+                return False
+            self._bekleyen.append(metin)
+            return True
+
+    def kalan_mesajlar(self) -> list[str]:
+        """Dongu bittiginde islenmeden kalmis mesajlari verir."""
+        with self._kilit:
+            kalan, self._bekleyen = self._bekleyen, []
+            return kalan
+
+    def _bekleyenleri_isle(self) -> None:
+        """Bekleyen kullanici mesajlarini bu turun baglamina katar."""
+        with self._kilit:
+            bekleyen, self._bekleyen = self._bekleyen, []
+        for metin in bekleyen:
+            self._yeni_mesajlar.append(
+                {"role": "user", "content": f"{ARA_MESAJ_BASLIGI}\n{metin}"}
+            )
+            self.mesaj_alindi.emit(metin)
 
     def resolve_approval(self, onay: bool) -> None:
         self._approval_result = bool(onay)
@@ -198,73 +299,171 @@ class AgentWorker(QThread):
         except Exception as exc:  # beklenmedik hata arayuzu cokertmesin
             self.failed.emit(f"Beklenmeyen hata: {exc}")
         finally:
+            with self._kilit:
+                self._kapandi = True
             self.done.emit(self._yeni_mesajlar)
 
-    def _dongu(self) -> None:
-        sistem = build_system_prompt(self.cfg, self.workspace, self.memory, self.open_files)
-        # sohbet kipinde arac dongusu yok, tek cevap verilir
-        tur_limiti = 1 if self.cfg.kip == "chat" else max(1, self.cfg.max_iterations)
+    # ---------- tek tur akisi ----------
 
-        for tur in range(1, tur_limiti + 1):
-            if self.cancel_event.is_set():
-                return
+    def _bir_tur(self, sistem: str) -> tuple[str, bool]:
+        """Modelden bir cevap alir. (ham_metin, akis_tamamlandi) doner.
 
-            self.step_started.emit(tur)
-            istek = [{"role": "system", "content": sistem}] + self.messages + self._yeni_mesajlar
+        Gecici bir API hatasi olur ve daha hic metin gelmediyse birkac kez
+        yeniden denenir. Metnin ortasinda koptuysa tekrar denemek ayni metni
+        iki kere yazdirir; o yuzden elde ne varsa onunla donulur ve dongu
+        kaldigi yerden devam eder. "Bir anda kesiliyor" sorununun kaynagi
+        buydu: tek bir gecici hata butun isi bitiriyordu.
+        """
+        istek = [{"role": "system", "content": sistem}] + self.messages + self._yeni_mesajlar
 
+        for deneme in range(YENIDEN_DENEME):
             ham = ""
             suzgec = StreamTagFilter()
-            for parca in self.client.stream(
-                istek,
-                model=self.cfg.model,
-                temperature=self.cfg.temperature,
-                max_tokens=self.cfg.max_tokens,
-                thinking=self.cfg.thinking,
-                cancel=self.cancel_event,
-            ):
-                if self.cancel_event.is_set():
-                    break
-                if parca.usage:
-                    self.usage_reported.emit(Kullanim.from_api(self.cfg.model, parca.usage))
-                if parca.reasoning:
-                    self.delta_reasoning.emit(parca.reasoning)
-                if parca.content:
-                    ham += parca.content
-                    gorunur = suzgec.feed(parca.content)
-                    if gorunur:
-                        self.delta_content.emit(gorunur)
+            try:
+                for parca in self.client.stream(
+                    istek,
+                    model=self.cfg.model,
+                    temperature=self.cfg.temperature,
+                    max_tokens=self.cfg.max_tokens,
+                    thinking=self.cfg.thinking,
+                    cancel=self.cancel_event,
+                ):
+                    if self.cancel_event.is_set():
+                        break
+                    if parca.usage:
+                        self.usage_reported.emit(
+                            Kullanim.from_api(self.cfg.model, parca.usage)
+                        )
+                    if parca.reasoning:
+                        self.delta_reasoning.emit(parca.reasoning)
+                    if parca.content:
+                        ham += parca.content
+                        gorunur = suzgec.feed(parca.content)
+                        if gorunur:
+                            self.delta_content.emit(gorunur)
+            except ApiError as exc:
+                kalan = suzgec.flush()
+                if kalan:
+                    self.delta_content.emit(kalan)
+                if ham.strip():
+                    # yarim cevap geldi: tekrar denemek metni cogaltir
+                    self.uyari.emit(f"Akis kesildi, kaldigi yerden devam ediliyor. ({exc})")
+                    return ham, False
+                if not _gecici_hata(exc) or deneme == YENIDEN_DENEME - 1:
+                    raise
+                sure = BEKLEME_SANIYE[min(deneme, len(BEKLEME_SANIYE) - 1)]
+                self.uyari.emit(f"Baglanti sorunu, {sure} saniye sonra tekrar deneniyor. ({exc})")
+                if self.cancel_event.wait(sure):
+                    return "", False
+                continue
 
             kalan = suzgec.flush()
             if kalan:
                 self.delta_content.emit(kalan)
 
+            if not ham.strip() and not self.cancel_event.is_set():
+                # model bos cevap dondu: bir kez daha sor
+                if deneme < YENIDEN_DENEME - 1:
+                    self.uyari.emit("Model bos cevap dondu, tekrar soruluyor.")
+                    continue
+            return ham, True
+
+        return "", False
+
+    # ---------- ana dongu ----------
+
+    def _dongu(self) -> None:
+        sistem = build_system_prompt(self.cfg, self.workspace, self.memory, self.open_files)
+
+        if self.cfg.kip == "chat":
+            self._sohbet_turu(sistem)
+            return
+
+        # 0 = sinirsiz. Kullanici Durdur demedigi surece is bitene kadar doner.
+        limit = max(0, int(getattr(self.cfg, "max_iterations", 0) or 0))
+        tur = 0
+        durtu = 0
+        onceki_imza: tuple | None = None
+        kisir = 0
+
+        while True:
+            if self.cancel_event.is_set():
+                return
+            tur += 1
+            if limit and tur > limit:
+                self.failed.emit(
+                    f"Islem {limit} adimda bitmedi ve durduruldu. Sinirsiz calismasi "
+                    "icin Ayarlar'dan adim limitini 0 yap."
+                )
+                return
+
+            self.step_started.emit(tur)
+            self._bekleyenleri_isle()
+
+            ham, tamam = self._bir_tur(sistem)
+            if self.cancel_event.is_set():
+                return
+
+            if not ham.strip():
+                # bos cevabi gecmise yazmak her istekte tekrar gonderilen
+                # anlamsiz bir tur birakiyor
+                return
+
             self._yeni_mesajlar.append({"role": "assistant", "content": ham})
             self.step_text_done.emit(tools.strip_tool_calls(ham))
 
-            if self.cancel_event.is_set():
-                return
-
-            if self.cfg.kip == "chat":
-                return
-
             cagrilar = tools.parse_tool_calls(ham)
-            if not cagrilar:
-                return  # is bitti
+            bitti = tools.gorev_bitti_mi(ham)
 
-            sonuclar = self._araclari_calistir(cagrilar)
-            if self.cancel_event.is_set():
+            if cagrilar:
+                durtu = 0
+                sonuclar = self._araclari_calistir(cagrilar)
+                if self.cancel_event.is_set():
+                    return
+                self._yeni_mesajlar.append({"role": "user", "content": sonuclar})
+
+                imza = tuple((c.kind, c.target, bool(c.ok)) for c in cagrilar)
+                hepsi_basarisiz = all(not c.ok for c in cagrilar)
+                if hepsi_basarisiz and imza == onceki_imza:
+                    kisir += 1
+                    if kisir >= MAX_KISIR_TUR:
+                        self.failed.emit(
+                            "Ayni islem ust uste ayni hatayi verdi ve ilerleme "
+                            "olmadi, dongu durduruldu. Arac kartlarindaki hataya "
+                            "bakip yeni bir yon ver."
+                        )
+                        return
+                else:
+                    kisir = 0
+                onceki_imza = imza
+                continue
+
+            if bitti or self.cfg.mode == "plan":
                 return
 
-            self._yeni_mesajlar.append({"role": "user", "content": sonuclar})
+            if not tamam:
+                # akis yarida kesildi, araclar da yok: kaldigi yerden devam etsin
+                durtu = 0
+                self._yeni_mesajlar.append({
+                    "role": "user",
+                    "content": "Cevabin yarida kesildi. Kaldigin yerden devam et.",
+                })
+                continue
 
-        if self.cfg.kip == "chat":
+            # arac yok, bitis bildirimi yok: is ortada birakilmis olabilir
+            durtu += 1
+            if durtu > MAX_DURTU:
+                return
+            self._yeni_mesajlar.append({"role": "user", "content": DEVAM_DURTUSU})
+
+    def _sohbet_turu(self, sistem: str) -> None:
+        """Sohbet kipi: arac yok, tek cevap."""
+        self.step_started.emit(1)
+        ham, _ = self._bir_tur(sistem)
+        if self.cancel_event.is_set() or not ham.strip():
             return
-
-        # tur limiti doldu
-        self.failed.emit(
-            f"Islem {self.cfg.max_iterations} turda bitmedi ve durduruldu. "
-            "Ayarlar'dan tur limitini artirabilirsin."
-        )
+        self._yeni_mesajlar.append({"role": "assistant", "content": ham})
+        self.step_text_done.emit(tools.strip_tool_calls(ham))
 
     def _araclari_calistir(self, cagrilar: list[ToolCall]) -> str:
         bloklar: list[str] = ["[ARAC SONUCLARI]"]
@@ -319,7 +518,8 @@ class AgentWorker(QThread):
             self.memory_changed.emit()
 
         bloklar.append(
-            "Yukaridaki sonuclara gore ise devam et. Baska arac gerekmiyorsa "
-            "kullaniciya kisa bir ozet yaz."
+            "Yukaridaki sonuclara gore ise devam et. Bir sey hata verdiyse sebebini "
+            "bul ve duzelt, pes etme. Is gercekten bittiyse kisa bir ozet yaz ve "
+            "sonuna <TASK_DONE> ekle."
         )
         return "\n\n".join(bloklar)

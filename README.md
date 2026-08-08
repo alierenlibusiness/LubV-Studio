@@ -43,8 +43,12 @@ meter so you always know what you are spending.
 | | |
 |---|---|
 | **Your prompt, unfiltered** | The Brain panel is the whole system prompt. Nothing hidden above it. |
-| **Real agent loop** | Reads, edits, runs, verifies, fixes and repeats until the task is done. |
-| **VS Code style workspace** | File tree, tabbed editor with syntax highlighting, integrated PowerShell, chat. |
+| **Runs until the job is done** | No step limit by default. The loop only ends when the agent declares the task finished or you press Stop. |
+| **Keep typing while it works** | Send another message mid-task. It is folded into the running job, or queued and started automatically. |
+| **Saved sessions** | Every chat is written to disk with its full transcript. Browse, search, reopen, rename and delete them. |
+| **Live balance** | Remaining API credit sits in the top bar and refreshes on its own, and again the moment a request finishes. |
+| **Prompt rules** | Teach LUBV the rules you want your requests judged against. It nudges you when a request is missing something. |
+| **VS Code style workspace** | File tree with expand arrows, tabbed editor with syntax highlighting, integrated shell, chat. |
 | **Three autonomy levels** | Plan (read only), Approve (diff before every write), Auto (hands off). |
 | **Two working modes** | Code for agentic work, Chat for plain conversation with tools disabled. |
 | **Web access** | Searches the web and reads pages, so it works with current docs and versions. |
@@ -105,20 +109,70 @@ on macOS. Icons for both platforms are generated during the build.
 ## The workspace
 
 ```
+  LUBV Studio · project path        mode · session cost · balance
 ┌────┬──────────────┬──────────────────────────┬───────────────┐
 │ 🗂 │              │   tabbed code editor     │  LUBV chat    │
-│ ⑂  │  file tree   │   line numbers, syntax   │  Code / Chat  │
-│ 🧠 │              │   Ctrl+S to save         │  Plan/Approve │
-│ ✦  │              ├──────────────────────────┤  /Auto        │
-│ ↩  │              │   integrated terminal    │  messages +   │
-│ ⚙  │              │   live, stateful         │  tool cards   │
+│ 💬 │  file tree   │   line numbers, syntax   │  Code / Chat  │
+│ ⑂  │  expand      │   Ctrl+S to save         │  Plan/Approve │
+│ 🧠 │  arrows      ├──────────────────────────┤  /Auto        │
+│ ✦  │              │   integrated terminal    │  messages +   │
+│ ↩  │              │   exit code, duration    │  tool cards   │
+│ ⚙  │              │   live, stateful         │  queue strip  │
 └────┴──────────────┴──────────────────────────┴───────────────┘
   project · status · cursor · session cost · today cost · model
 ```
 
-The left rail switches the side panel: **Files**, **Source control**,
-**Memory**, **Brain**, **Undo**, **Settings**. Click the active icon again to
-collapse the panel.
+The top bar always shows the project path, the current mode, what this session
+has cost and your **remaining API balance**, which refreshes on a timer and
+again the moment a request finishes. Click it to refresh immediately.
+
+The left rail switches the side panel: **Files**, **Sessions**, **Source
+control**, **Memory**, **Brain**, **Undo**, **Settings**. Click the active icon
+again to collapse the panel.
+
+In the file tree, folders carry a VS Code style arrow: pointing right when
+collapsed, down when open. A single click toggles a folder, a double click
+opens a file.
+
+## Sessions
+
+Every conversation is a session, written to disk as it happens. The **Sessions**
+panel lists them newest first with their project, message count and time, and
+lets you search, open, rename and delete them, or clear the lot.
+
+Reopening a session restores both halves of it: the message history the model
+sees, and the visual transcript, including the tool cards with their output. The
+session you are in is marked in the list, and starting a new chat saves the old
+one first, so nothing is lost by accident.
+
+## While it is working
+
+You do not have to wait for a turn to end before typing again.
+
+- If the agent is mid-task, your new message is **handed to the running job** and
+  taken into account on its next step.
+- If the job happens to finish in that instant, the message is **queued** and a
+  fresh run starts automatically. The queue strip above the input shows what is
+  waiting.
+- **Stop** cancels the current turn and drops anything queued behind it.
+
+The agent keeps going until it declares the task finished. If it stops with a
+half-finished job, the loop prompts it to continue instead of handing control
+back to you, and a dropped connection or a transient API error is retried rather
+than ending the run. There is no step limit by default; set one in Settings if
+you want a hard ceiling.
+
+## Prompt rules
+
+Settings has a **Prompt rules** block: the rules you want your own requests
+judged against, editable and bilingual, with a sensible default set.
+
+LUBV is given these rules along with the brain. When a request is clear it says
+nothing and gets to work. When something is missing it makes the most reasonable
+assumption, starts anyway, and adds a single line telling you what would have
+made it faster. When a request is genuinely too vague to act on, it names the
+missing rule and writes a corrected version of your request as an example. Turn
+it off with one checkbox.
 
 ## Modes
 
@@ -145,10 +199,14 @@ prompt, just conversation.
 | List folder | Directory contents |
 | Search project | Full text search across the workspace |
 | Delete file | Removes a file, after approval |
-| Run command | Executes in the project folder, in your shell: PowerShell on Windows, zsh on macOS |
+| Run command | Executes in the project folder, in the same shell the terminal panel uses: PowerShell on Windows, zsh on macOS |
 | Web search | Live search for current docs, error messages, library versions |
 | Fetch page | Opens a URL and extracts the readable text |
 | Write memory | Leaves a durable note for future sessions |
+| Task done | Declares the job finished. Until it appears, the loop keeps the agent working |
+
+Tool cards report what actually happened rather than a stopwatch reading, so a
+read shows the number of lines it took in and a command shows its exit code.
 
 Every path is resolved against the project root. `..` and absolute paths outside
 the workspace are rejected before the operation runs.
@@ -163,9 +221,14 @@ rates (USD per 1M tokens):
 | `deepseek-v4-flash` | $0.0028 | $0.14 | $0.28 |
 | `deepseek-v4-pro` | $0.003625 | $0.435 | $0.87 |
 
-The status bar shows session and daily spend at all times. Settings breaks it
-down by session, today, all time and the last few days. A typical request costs
-between **0.02¢ and 0.5¢**.
+The status bar shows session and daily spend at all times, and the top bar keeps
+your remaining balance in view and refreshes it by itself. Settings breaks the
+spend down by session, today, all time and the last few days. A typical request
+costs between **0.02¢ and 0.5¢**.
+
+Because there is no step limit by default, a large task can run for many steps.
+The balance in the top bar is there so this never surprises you, and Stop always
+ends the run immediately.
 
 ## Source control
 
@@ -205,6 +268,8 @@ it."* Commands the agent runs are echoed into the same terminal.
 | `Shift+Enter` | New line |
 | `Ctrl+S` | Save current file |
 | `Ctrl+Shift+S` | Save all |
+| `Tab` / `Shift+Tab` | Indent or outdent the selected lines |
+| `Middle click` | Close a tab |
 | `Ctrl+B` | Toggle side panel |
 | `Ctrl+J` | Toggle terminal |
 | `Ctrl+O` | Open another project |
@@ -220,8 +285,9 @@ Nothing is written into your project except the files you asked the agent to
 change. Application state lives in `~/.lubv_studio/`:
 
 ```
-config.json        settings and API key
+config.json        settings, prompt rules and API key
 memory/            persistent notes, global and per project
+sessions/          saved chats, one JSON file per session
 checkpoints/       previous versions of every file the agent touched
 usage.json         token and cost history
 ```
